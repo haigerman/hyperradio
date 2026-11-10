@@ -75,8 +75,14 @@ class SpotifyApi(
         prefs.edit().remove(KEY_VERIFIER).remove(KEY_STATE).apply()
     }
 
+    /** Hat der Login alle Berechtigungen, die diese Version braucht? (neue kamen mit Updates dazu) */
+    fun hasAllScopes(): Boolean {
+        val granted = prefs.getString(KEY_SCOPE, null)?.split(" ")?.toSet() ?: return false
+        return granted.containsAll(SpotifyConfig.SCOPES)
+    }
+
     fun logout() {
-        prefs.edit().remove(KEY_ACCESS).remove(KEY_REFRESH).remove(KEY_EXPIRES).apply()
+        prefs.edit().remove(KEY_ACCESS).remove(KEY_REFRESH).remove(KEY_EXPIRES).remove(KEY_SCOPE).remove(KEY_PLAYLIST).apply()
     }
 
     private fun tokenRequest(params: Map<String, String>) {
@@ -101,6 +107,7 @@ class SpotifyApi(
             .putLong(KEY_EXPIRES, System.currentTimeMillis() + json.optLong("expires_in", 3600) * 1000 - 60_000)
         // Spotify schickt beim Erneuern manchmal einen neuen Refresh-Token mit
         json.optString("refresh_token").takeIf { it.isNotEmpty() }?.let { edit.putString(KEY_REFRESH, it) }
+        json.optString("scope").takeIf { it.isNotEmpty() }?.let { edit.putString(KEY_SCOPE, it) }
         edit.apply()
     }
 
@@ -328,59 +335,90 @@ class SpotifyApi(
         }
     }
 
+    // ------------------------------------------------------------------ Mix-Playlist
+
     /**
-     * Startet die Titelliste auf dem Gerät, robust gegen die üblichen Stolpersteine:
-     * 1. Wiedergabe erst auf das Gerät übertragen – sonst verwirft die Handy-App den Befehl oft,
-     *    wenn sie gerade nicht aktiv ist.
-     * 2. Abspielen mehrmals versuchen (kurz nach dem Start meldet Spotify "Gerät nicht gefunden");
-     *    lehnt Spotify die Liste als zu lang ab, mit kürzerer Liste.
-     * 3. Nachsehen, ob wirklich ein Titel aus der Liste läuft; sonst noch einmal anstoßen.
+     * Die private Playlist "HyperRadio-Mix" im Konto des Nutzers (wird beim ersten Mal angelegt).
+     * Eine lose Titelliste über die API ignoriert die Spotify-App im Hintergrund oft – eine
+     * Playlist dagegen lässt sich zuverlässig starten und notfalls in Spotify selbst abspielen.
+     */
+    fun ensureMixPlaylist(): String {
+        prefs.getString(KEY_PLAYLIST, null)?.let { id ->
+            val exists = try {
+                call("GET", "/playlists/$id?fields=id")
+                true
+            } catch (e: SpotifyException) {
+                if (e.status == 404 || e.status == 403) false else throw e
+            }
+            if (exists) return id
+        }
+        val body = JSONObject()
+            .put("name", MIX_PLAYLIST_NAME)
+            .put("public", false)
+            .put("description", "Zufallsmix aus HyperRadio – wird bei jedem Mix neu befüllt")
+        val created = try {
+            call("POST", "/me/playlists", body)
+        } catch (e: SpotifyException) {
+            if (e.status != 404 && e.status != 405) throw e
+            val user = JSONObject(call("GET", "/me")).getString("id")
+            call("POST", "/users/${q(user)}/playlists", body)
+        }
+        val id = JSONObject(created).getString("id")
+        prefs.edit().putString(KEY_PLAYLIST, id).apply()
+        return id
+    }
+
+    /** Ersetzt den Inhalt der Playlist (höchstens 100 Titel pro Anfrage – mehr braucht der Mix nicht). */
+    fun replacePlaylistItems(playlistId: String, uris: List<String>) {
+        val body = JSONObject().put("uris", JSONArray(uris.take(100)))
+        try {
+            call("PUT", "/playlists/$playlistId/items", body)
+        } catch (e: SpotifyException) {
+            // ältere Fassung des Endpunkts
+            if (e.status == 404) call("PUT", "/playlists/$playlistId/tracks", body) else throw e
+        }
+    }
+
+    /**
+     * Startet [contextUri] (die Mix-Playlist) ab dem ersten Titel auf dem Gerät:
+     * 1. Wiedergabe auf das Gerät übertragen,
+     * 2. abspielen (mehrere Versuche, kurz nach dem Start meldet Spotify "Gerät nicht gefunden"),
+     * 3. nachsehen, ob die Playlist wirklich läuft; sonst noch einmal anstoßen.
      * Gibt zurück, ob die Wiedergabe bestätigt wurde.
      */
-    fun startPlayback(deviceId: String, uris: List<String>): Boolean {
+    fun startPlayback(deviceId: String, contextUri: String): Boolean {
         val dev = q(deviceId)
-        // 1. übertragen (Fehler hier sind nicht schlimm – Schritt 2 sagt, ob es geht)
+        val playBody = { JSONObject().put("context_uri", contextUri).put("offset", JSONObject().put("position", 0)) }
         runCatching { call("PUT", "/me/player", JSONObject().put("device_ids", JSONArray(listOf(deviceId))).put("play", false)) }
         sleep(800)
+        // eigene Zufallsreihenfolge → Spotifys Shuffle aus, damit sie nicht nochmal umgewürfelt wird
         runCatching { call("PUT", "/me/player/shuffle?state=false&device_id=$dev") }
 
-        // 2. abspielen
-        var list = uris
-        var lastError: SpotifyException? = null
         var attempt = 0
-        while (attempt < 4) {
+        while (true) {
             try {
-                call("PUT", "/me/player/play?device_id=$dev", JSONObject().put("uris", JSONArray(list)))
-                lastError = null
+                call("PUT", "/me/player/play?device_id=$dev", playBody())
                 break
             } catch (e: SpotifyException) {
-                lastError = e
-                when {
-                    (e.status == 400 || e.status == 413) && list.size > 20 -> list = list.take(if (list.size > 50) 50 else 20)
-                    e.status == 404 || e.status == 502 || e.status == 503 || e.status == 500 -> {
-                        attempt++
-                        sleep(1500L * attempt)
-                        runCatching { call("PUT", "/me/player", JSONObject().put("device_ids", JSONArray(listOf(deviceId))).put("play", false)) }
-                    }
-                    else -> throw e
-                }
+                if (attempt >= 3 || e.status !in setOf(404, 500, 502, 503)) throw e
+                attempt++
+                sleep(1500L * attempt)
+                runCatching { call("PUT", "/me/player", JSONObject().put("device_ids", JSONArray(listOf(deviceId))).put("play", false)) }
             }
         }
-        lastError?.let { throw it }
         runCatching { call("PUT", "/me/player/repeat?state=off&device_id=$dev") }
 
-        // 3. prüfen
-        val wanted = list.toHashSet()
         repeat(3) { check ->
             sleep(1200)
-            val state = runCatching { JSONObject(call("GET", "/me/player")) }.getOrNull()
-            val uri = state?.optJSONObject("item")?.optString("uri")
-            val playing = state?.optBoolean("is_playing") == true
-            val onDevice = state?.optJSONObject("device")?.optString("id") == deviceId
-            if (playing && onDevice && uri in wanted) return true
-            if (check == 1) runCatching { call("PUT", "/me/player/play?device_id=$dev", JSONObject()) }
+            if (isPlayingContext(contextUri)) return true
+            if (check == 1) runCatching { call("PUT", "/me/player/play?device_id=$dev", playBody()) }
         }
         return false
+    }
+
+    fun isPlayingContext(contextUri: String): Boolean {
+        val state = runCatching { call("GET", "/me/player") }.getOrNull()?.takeIf { it.isNotBlank() }?.let(::JSONObject)
+        return state?.optBoolean("is_playing") == true && state.optJSONObject("context")?.optString("uri") == contextUri
     }
 
     fun pause() {
@@ -415,5 +453,8 @@ class SpotifyApi(
         private const val KEY_EXPIRES = "expires_at"
         private const val KEY_VERIFIER = "pkce_verifier"
         private const val KEY_STATE = "pkce_state"
+        private const val KEY_SCOPE = "granted_scope"
+        private const val KEY_PLAYLIST = "mix_playlist_id"
+        const val MIX_PLAYLIST_NAME = "HyperRadio-Mix"
     }
 }

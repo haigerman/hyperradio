@@ -29,9 +29,10 @@ class SpotifyApiTest {
 
     // Wiedergabe-Simulation
     private var transferred = false
-    private var maxUris = 50
-    private var playingUri: String? = null
+    private var playingContext: String? = null
     private var ignorePlay = false
+    private var playlistItems: String? = null
+    private var meCreateAllowed = true
 
     private val artist = SpotifyArtist("art1", "The Band")
 
@@ -60,14 +61,16 @@ class SpotifyApiTest {
             if (h.isEmpty()) break
             if (h.startsWith("Content-Length:", ignoreCase = true)) length = h.substringAfter(":").trim().toInt()
         }
-        val buf = CharArray(length)
-        var read = 0
-        while (read < length) {
-            val r = reader.read(buf, read, length - read)
-            if (r < 0) break
-            read += r
+        // Content-Length zählt Bytes, der Reader liefert Zeichen (Umlaute/„–“ sind mehrere Bytes)
+        val sb = StringBuilder()
+        var bytes = 0
+        while (bytes < length) {
+            val c = reader.read()
+            if (c < 0) break
+            sb.append(c.toChar())
+            bytes += c.toChar().toString().toByteArray().size
         }
-        val body = String(buf, 0, read)
+        val body = sb.toString()
         val path = target.substringBefore("?").removePrefix("/v1")
         val rawQuery = target.substringAfter("?", "")
         run {
@@ -102,19 +105,23 @@ class SpotifyApiTest {
                 }
                 path == "/me/player/play" -> when {
                     !transferred -> 404 to """{"error":{"status":404,"message":"Device not found"}}"""
-                    body.contains("uris") -> {
-                        val n = Regex("spotify:track:").findAll(body).count()
-                        if (n > maxUris) 400 to """{"error":{"status":400,"message":"Too many ids"}}"""
-                        else {
-                            if (!ignorePlay) playingUri = Regex("spotify:track:[a-z0-9]+").find(body)?.value
-                            204 to ""
-                        }
+                    else -> {
+                        if (!ignorePlay) playingContext = Regex("\"context_uri\":\"([^\"]+)\"").find(body)?.groupValues?.get(1)
+                        204 to ""
                     }
-                    else -> 204 to ""
                 }
                 path == "/me/player" && method == "GET" ->
-                    if (playingUri == null) 204 to ""
-                    else 200 to """{"is_playing":true,"device":{"id":"dev1"},"item":{"uri":"$playingUri"}}"""
+                    if (playingContext == null) 204 to ""
+                    else 200 to """{"is_playing":true,"device":{"id":"dev1"},"context":{"uri":"$playingContext"}}"""
+                path == "/me/playlists" && method == "POST" ->
+                    if (meCreateAllowed) 201 to """{"id":"pl1"}""" else 404 to """{"error":{"status":404,"message":"Not found"}}"""
+                path == "/me" -> 200 to """{"id":"user1","display_name":"Test"}"""
+                path == "/users/user1/playlists" && method == "POST" -> 201 to """{"id":"pl2"}"""
+                path.matches(Regex("/playlists/pl[12]")) -> 200 to """{"id":"pl"}"""
+                path.matches(Regex("/playlists/pl[12]/items")) && method == "PUT" -> {
+                    playlistItems = body
+                    200 to """{"snapshot_id":"x"}"""
+                }
                 path.startsWith("/me/player/") -> 204 to ""
                 else -> 404 to """{"error":{"status":404,"message":"Not found"}}"""
             }
@@ -134,19 +141,33 @@ class SpotifyApiTest {
     private val mix = (1..100).map { "spotify:track:m$it" }
 
     @Test
-    fun transfersFirstAndShortensTooLongList() {
-        assertTrue(api().startPlayback("dev1", mix))
-        assertEquals("spotify:track:m1", playingUri)
+    fun createsPlaylistFillsItAndStartsIt() {
+        val api = api()
+        val id = api.ensureMixPlaylist()
+        assertEquals("pl1", id)
+        api.replacePlaylistItems(id, mix)
+        assertEquals(100, Regex("spotify:track:").findAll(playlistItems!!).count())
+        assertTrue(api.startPlayback("dev1", "spotify:playlist:pl1"))
+        assertEquals("spotify:playlist:pl1", playingContext)
         // erst übertragen, dann abspielen
         val firstTransfer = requests.indexOfFirst { it.startsWith("/me/player?") }
         val firstPlay = requests.indexOfFirst { it.startsWith("/me/player/play") }
         assertTrue(firstTransfer in 0 until firstPlay)
+        // zweiter Aufruf nutzt dieselbe Playlist
+        assertEquals("pl1", api.ensureMixPlaylist())
+        assertEquals(1, requests.count { it.startsWith("/me/playlists") })
+    }
+
+    @Test
+    fun fallsBackToUserPlaylistEndpoint() {
+        meCreateAllowed = false
+        assertEquals("pl2", api().ensureMixPlaylist())
     }
 
     @Test
     fun reportsWhenSpotifyAcceptsButDoesNotPlay() {
         ignorePlay = true
-        assertEquals(false, api().startPlayback("dev1", mix.take(10)))
+        assertEquals(false, api().startPlayback("dev1", "spotify:playlist:pl1"))
     }
 
     @Test

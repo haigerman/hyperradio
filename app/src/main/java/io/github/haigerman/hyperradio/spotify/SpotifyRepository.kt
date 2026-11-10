@@ -59,8 +59,12 @@ object SpotifyRepository {
         if (::prefs.isInitialized) return
         prefs = context.applicationContext.getSharedPreferences("spotify", Context.MODE_PRIVATE)
         api = SpotifyApi(prefs)
+        // Login aus einer älteren Version ohne die nötigen Berechtigungen → neu anmelden lassen
+        val needsRelogin = api.isLoggedIn && !api.hasAllScopes()
+        if (needsRelogin) api.logout()
         _state.update {
             it.copy(
+                message = if (needsRelogin) "HyperRadio braucht für den Spotify-Mix neue Berechtigungen – bitte einmal neu bei Spotify anmelden" else null,
                 loggedIn = api.isLoggedIn,
                 userName = prefs.getString(KEY_USER, null),
                 selected = decodeArtists(prefs.getString(KEY_SELECTED, null)),
@@ -180,11 +184,17 @@ object SpotifyRepository {
                 val uris = MixBuilder.build(pool, MAX_TRACKS)
                 if (uris.isEmpty()) throw IllegalStateException("Keine abspielbaren Titel gefunden")
 
+                _state.update { it.copy(busy = "Aktualisiere Playlist „${SpotifyApi.MIX_PLAYLIST_NAME}“ …") }
+                val playlistId = withContext(Dispatchers.IO) {
+                    api.ensureMixPlaylist().also { api.replacePlaylistItems(it, uris) }
+                }
+                val contextUri = "spotify:playlist:$playlistId"
+
                 _state.update { it.copy(busy = "Verbinde mit Spotify …") }
                 var device = withContext(Dispatchers.IO) { pickDevice(app) }
                 if (device == null) {
-                    // Spotify läuft noch nicht → App starten, dann meldet sie sich als Gerät an
-                    openSpotify(app)
+                    // Spotify läuft noch nicht → direkt auf der Mix-Playlist öffnen, dann meldet es sich als Gerät an
+                    openSpotifyAt(app, contextUri)
                     _state.update { it.copy(busy = "Warte auf die Spotify-App …") }
                     for (i in 0 until 15) {
                         delay(1000)
@@ -205,14 +215,23 @@ object SpotifyRepository {
                 }
 
                 _state.update { it.copy(busy = "Starte ${uris.size} Titel auf „${device.name}“ …") }
-                val confirmed = withContext(Dispatchers.IO) { api.startPlayback(device.id, uris) }
+                var confirmed = withContext(Dispatchers.IO) { api.startPlayback(device.id, contextUri) }
+                if (!confirmed) {
+                    // Die Spotify-App ignoriert Befehle oft, solange sie im Hintergrund ist →
+                    // nach vorne holen (direkt auf der Mix-Playlist) und noch einmal starten
+                    _state.update { it.copy(busy = "Öffne Spotify …") }
+                    openSpotifyAt(app, contextUri)
+                    delay(2500)
+                    val again = withContext(Dispatchers.IO) { runCatching { pickDevice(app) }.getOrNull() } ?: device
+                    confirmed = withContext(Dispatchers.IO) { runCatching { api.startPlayback(again.id, contextUri) }.getOrDefault(false) }
+                }
                 prefs.edit().putBoolean(KEY_MIX_ACTIVE, true).apply()
                 _state.update {
                     it.copy(
                         busy = null,
                         mixActive = true,
                         message = if (confirmed) null
-                        else "Spotify hat die Liste angenommen, spielt aber noch nicht – öffne Spotify und tippe dort auf Play",
+                        else "Spotify zeigt die Playlist „${SpotifyApi.MIX_PLAYLIST_NAME}“ – tippe dort auf Play",
                     )
                 }
                 onDone?.invoke(null)
@@ -266,8 +285,11 @@ object SpotifyRepository {
             ?: phones.firstOrNull { it.isActive }
     }
 
-    private fun openSpotify(context: Context) {
-        val intent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
+    /** Öffnet die Spotify-App direkt auf [spotifyUri] (z. B. der Mix-Playlist). */
+    private fun openSpotifyAt(context: Context, spotifyUri: String) {
+        val pm = context.packageManager
+        val deepLink = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(spotifyUri)).setPackage(SPOTIFY_PACKAGE)
+        val intent = (if (deepLink.resolveActivity(pm) != null) deepLink else pm.getLaunchIntentForPackage(SPOTIFY_PACKAGE))
             ?: throw IllegalStateException("Die Spotify-App ist nicht installiert")
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         // aus dem Hintergrund (z. B. im Auto) kann Android das verhindern – dann warten wir trotzdem,

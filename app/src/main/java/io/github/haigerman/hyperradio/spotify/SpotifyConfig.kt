@@ -18,6 +18,9 @@ object SpotifyConfig {
         "user-read-currently-playing",
         "user-follow-read",
         "user-top-read",
+        // der Mix wird als private Playlist "HyperRadio-Mix" abgelegt und von dort abgespielt
+        "playlist-modify-private",
+        "playlist-read-private",
     )
 
     val isConfigured: Boolean get() = CLIENT_ID.isNotBlank()

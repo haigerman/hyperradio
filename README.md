@@ -42,6 +42,12 @@ sammelt von jedem Künstler bis zu ca. 100 Titel, mischt sie so, dass jeder Kün
 drankommt und nie zwei Titel desselben Künstlers direkt hintereinander laufen, und spielt
 100 Titel davon (≈ 6 Stunden) in der **Spotify-App auf dem Handy** ab. 🔀 mischt neu.
 
+Der Mix landet dazu in der privaten Playlist **„HyperRadio-Mix“** in deinem Spotify-Konto,
+die bei jedem Mix neu befüllt wird. HyperRadio startet sie über die Schnittstelle; ignoriert die
+Spotify-App das (passiert, wenn sie im Hintergrund ist), wird Spotify direkt auf der Playlist
+geöffnet und noch einmal gestartet. So läuft der Mix auch, wenn man in Spotify selbst auf Play
+tippt, und die Playlist ist auch in Spotifys eigener Android-Auto-Ansicht zu finden.
+
 Gut zu wissen:
 
 - Nötig sind **Spotify Premium** und die installierte Spotify-App. Spotify gibt seinen Ton nicht
