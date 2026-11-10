@@ -1,6 +1,7 @@
 package io.github.haigerman.hyperradio.playback
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
@@ -20,7 +21,11 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
@@ -63,6 +68,20 @@ class PlaybackService : MediaLibraryService() {
     private var waitingForNetwork = false
     private var gaveUp = false
     private var hadReadyForItem = false
+    private var currentId: String? = null
+
+    /** Cover je Sender: ruhige Welle für die Liste, Live-Schnappschuss für "läuft gerade" */
+    private val staticCovers = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    private val liveCovers = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    private val snapshot = FloatArray(1024)
+
+    private val coverTicker = object : Runnable {
+        override fun run() {
+            main.removeCallbacks(this)
+            refreshLiveCover()
+            main.postDelayed(this, COVER_REFRESH_MS)
+        }
+    }
 
     private var connectivity: ConnectivityManager? = null
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -115,6 +134,7 @@ class PlaybackService : MediaLibraryService() {
         } catch (_: Exception) {
         }
         main.post(statusTicker)
+        main.postDelayed(coverTicker, COVER_REFRESH_MS)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -156,7 +176,20 @@ class PlaybackService : MediaLibraryService() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        return ExoPlayer.Builder(this)
+        // Abgriff des Audiosignals für Oszilloskop und Live-Cover
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setAudioProcessors(arrayOf(TeeAudioProcessor(AudioTap)))
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .build()
+        }
+
+        return ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(
@@ -193,6 +226,7 @@ class PlaybackService : MediaLibraryService() {
                     failures = 0
                     gaveUp = false
                     waitingForNetwork = false
+                    if (!hadReadyForItem) main.postDelayed(coverTicker, FIRST_COVER_DELAY_MS)
                     hadReadyForItem = true
                 }
                 Player.STATE_ENDED -> {
@@ -224,6 +258,9 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // nur das Cover wurde ausgetauscht → kein Senderwechsel
+            if (mediaItem?.mediaId == currentId && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
+            currentId = mediaItem?.mediaId
             cancelReconnect()
             failures = 0
             gaveUp = false
@@ -232,7 +269,17 @@ class PlaybackService : MediaLibraryService() {
             publishStatus()
         }
 
-        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) = publishStatus()
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            val title = mediaMetadata.title?.toString()
+            if (title != lastTitle) {
+                lastTitle = title
+                // neuer Titel → frisches Cover
+                if (hadReadyForItem) main.postDelayed(coverTicker, FIRST_COVER_DELAY_MS)
+            }
+            publishStatus()
+        }
+
+        private var lastTitle: String? = null
     }
 
     // ------------------------------------------------------------------ Wiederverbinden
@@ -345,11 +392,45 @@ class PlaybackService : MediaLibraryService() {
             .setMediaId(station.id)
             .setUri(uri)
             .apply { if (StreamResolver.isHls(uri)) setMimeType(MimeTypes.APPLICATION_M3U8) }
-            .setMediaMetadata(browseMetadata(station))
+            .setMediaMetadata(browseMetadata(station, liveCovers[station.id]))
             .build()
     }
 
-    private fun browseMetadata(station: Station) = MediaMetadata.Builder()
+    /** Neues Cover mit einem Schnappschuss der aktuellen Welle (Android Auto kann keine Animation). */
+    private fun refreshLiveCover() {
+        if (!player.isPlaying) return
+        val item = player.currentMediaItem ?: return
+        val station = RadioRepository.find(item.mediaId) ?: return
+        if (!AudioTap.snapshot(snapshot)) return
+        val samples = snapshot.copyOf()
+        val future = io.submit<ByteArray> { CoverArt.render(station, samples) }
+        future.addListener({
+            val bytes = try {
+                future.get()
+            } catch (_: Exception) {
+                return@addListener
+            }
+            liveCovers.clear()
+            liveCovers[station.id] = bytes
+            val index = player.currentMediaItemIndex
+            val current = player.currentMediaItem ?: return@addListener
+            if (current.mediaId != station.id) return@addListener
+            val updated = current.buildUpon()
+                .setMediaMetadata(
+                    current.mediaMetadata.buildUpon()
+                        .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                        .build(),
+                )
+                .build()
+            player.replaceMediaItem(index, updated)
+        }, ContextCompatExecutor(main))
+    }
+
+    private fun staticCover(station: Station): ByteArray =
+        staticCovers.getOrPut(station.id) { CoverArt.render(station, null, size = 320) }
+
+    private fun browseMetadata(station: Station, artwork: ByteArray? = null) = MediaMetadata.Builder()
+        .setArtworkData(artwork ?: staticCover(station), MediaMetadata.PICTURE_TYPE_FRONT_COVER)
         .setTitle(station.name)
         .setArtist(station.subtitle)
         .setStation(station.name)
@@ -517,6 +598,8 @@ class PlaybackService : MediaLibraryService() {
         const val BUFFER_AFTER_REBUFFER_MS = 10_000
 
         private const val STOP_AFTER_PAUSE_MS = 60_000L
+        private const val COVER_REFRESH_MS = 12_000L
+        private const val FIRST_COVER_DELAY_MS = 2_500L
         private const val NO_NETWORK_RETRY_MS = 15_000L
         private const val MAX_FAILURES = 25
 
