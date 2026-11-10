@@ -13,6 +13,7 @@ val Sand = Color(0xFFE8C77A)
 val Mist = Color(0xFF8CC7C4)
 val TextSoft = Color(0xFFB8C7C9)
 val Coral = Color(0xFFFF8A65)
+val SpotifyGreen = Color(0xFF1ED760)
 
 private val colors = darkColorScheme(
     primary = Sand,

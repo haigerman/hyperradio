@@ -33,6 +33,36 @@ umbenennen, ändern oder löschen.
 - Pause bei Anruf/Navigationsansage/anderer Audio-App und beim Abziehen der Kopfhörer
 - Längere Pause (> 1 min) → beim Fortsetzen geht es wieder live weiter statt zeitversetzt
 
+## Spotify-Mix
+
+Unter den Sendern gibt es die Karte **Spotify-Mix**: Beim ersten Tippen meldest du dich bei
+Spotify an, danach wählst du Künstler aus – per Suche mit Autovervollständigung oder
+alphabetisch (A–Z) aus den Künstlern, denen du folgst bzw. die du am meisten hörst. HyperRadio
+sammelt von jedem Künstler bis zu ca. 100 Titel, mischt sie so, dass jeder Künstler gleich oft
+drankommt und nie zwei Titel desselben Künstlers direkt hintereinander laufen, und spielt
+100 Titel davon (≈ 6 Stunden) in der **Spotify-App auf dem Handy** ab. 🔀 mischt neu.
+
+Gut zu wissen:
+
+- Nötig sind **Spotify Premium** und die installierte Spotify-App. Spotify gibt seinen Ton nicht
+  an fremde Apps heraus – HyperRadio wählt die Titel aus, abgespielt wird in Spotify.
+  In Android Auto erscheint die Wiedergabe deshalb unter Spotify.
+- Die Anmeldung läuft über Spotifys offizielles Verfahren für Apps (OAuth mit PKCE).
+  HyperRadio bekommt dein Passwort nie zu sehen, nur ein Zugangs-Token.
+
+### Einrichtung (einmalig)
+
+1. Auf <https://developer.spotify.com/dashboard> mit dem Spotify-Konto anmelden und
+   **Create app** wählen.
+2. Ausfüllen: App name `HyperRadio`, App description beliebig, **Redirect URI**
+   `hyperradio://spotify-callback` (genau so, dann *Add*), bei *Which API/SDKs* **Web API**
+   ankreuzen, Bedingungen bestätigen, *Save*.
+3. In den Einstellungen der neuen App die **Client ID** kopieren und in
+   `app/src/main/java/io/github/haigerman/hyperradio/spotify/SpotifyConfig.kt` bei
+   `CLIENT_ID` eintragen. Die Client ID ist nicht geheim, ein Client Secret wird nicht gebraucht.
+4. Die App läuft im *Development mode*: Das eigene Konto funktioniert direkt. Weitere
+   Spotify-Konten müssen unter **User Management** mit Name und E-Mail eingetragen werden.
+
 ## Puffer & Verbindungsabbrüche
 
 Damit die Wiedergabe auch unterwegs (Funklöcher, Tunnel, Wechsel WLAN ↔ Mobilfunk) ohne
@@ -61,6 +91,10 @@ Die Werte stehen in `playback/PlaybackService.kt` (`MIN_BUFFER_MS` …).
 | `playback/PlaybackService.kt` | Media3 `MediaLibraryService`: Player, Puffer, Wiederverbinden, Senderliste für Android Auto |
 | `playback/AudioTap.kt` | Greift das dekodierte Audiosignal ab (für die Welle im Cover) |
 | `playback/CoverArt.kt` | Zeichnet die Cover mit Welle für Android Auto und Benachrichtigung |
+| `spotify/SpotifyApi.kt` | Spotify Web API: Anmeldung (PKCE), Künstlersuche, Titel, Geräte, Wiedergabe |
+| `spotify/SpotifyRepository.kt` | Zustand und Abläufe des Spotify-Mix |
+| `spotify/MixBuilder.kt` | Gleichmäßige Zufallsmischung über alle Künstler |
+| `ui/SpotifyScreen.kt` | Künstlerauswahl und Steuerung des Spotify-Mix |
 | `playback/StreamResolver.kt` | Löst `.m3u`/`.pls`-Playlists zur eigentlichen Stream-Adresse auf |
 | `data/Station.kt` | Sender und die eingebauten Streams |
 | `data/RadioRepository.kt` | Gemeinsamer Zustand von UI und Dienst, gespeicherte eigene Sender |

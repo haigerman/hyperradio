@@ -2,6 +2,8 @@ package io.github.haigerman.hyperradio
 
 import android.Manifest
 import android.content.ComponentName
+import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -9,6 +11,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -21,8 +31,17 @@ import io.github.haigerman.hyperradio.data.RadioRepository
 import io.github.haigerman.hyperradio.playback.PlaybackService
 import io.github.haigerman.hyperradio.ui.HyperRadioTheme
 import io.github.haigerman.hyperradio.ui.RadioScreen
+import io.github.haigerman.hyperradio.ui.Sand
+import io.github.haigerman.hyperradio.ui.SpotifyScreen
+import io.github.haigerman.hyperradio.spotify.SpotifyConfig
+import io.github.haigerman.hyperradio.spotify.SpotifyRepository
 
 class MainActivity : ComponentActivity() {
+
+    private companion object {
+        const val SCREEN_RADIO = "radio"
+        const val SCREEN_SPOTIFY = "spotify"
+    }
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val controller: MediaController?
@@ -34,15 +53,82 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         RadioRepository.init(this)
+        SpotifyRepository.init(this)
+        handleSpotifyRedirect(intent)
         enableEdgeToEdge()
         setContent {
             HyperRadioTheme {
-                RadioScreen(
-                    onStationClick = ::playStation,
-                    onPlayPause = ::togglePlayback,
-                )
+                var screen by rememberSaveable { mutableStateOf(if (openSpotifyAfterLogin) SCREEN_SPOTIFY else SCREEN_RADIO) }
+                var setupInfo by rememberSaveable { mutableStateOf(false) }
+                openSpotifyScreen = { screen = SCREEN_SPOTIFY }
+                when (screen) {
+                    SCREEN_SPOTIFY -> SpotifyScreen(
+                        onBack = { screen = SCREEN_RADIO },
+                        onStartMix = ::startSpotifyMix,
+                    )
+                    else -> RadioScreen(
+                        onStationClick = ::playStation,
+                        onPlayPause = ::togglePlayback,
+                        onSpotifyClick = {
+                            val sp = SpotifyRepository.state.value
+                            when {
+                                !sp.configured -> setupInfo = true
+                                !sp.loggedIn -> loginToSpotify()
+                                else -> screen = SCREEN_SPOTIFY
+                            }
+                        },
+                    )
+                }
+                if (setupInfo) {
+                    AlertDialog(
+                        onDismissRequest = { setupInfo = false },
+                        title = { Text("Spotify einrichten") },
+                        text = {
+                            Text(
+                                "Für Spotify braucht HyperRadio eine eigene Client ID aus dem Spotify-Entwicklerportal " +
+                                    "(developer.spotify.com). Die Anleitung steht im README des Projekts.",
+                            )
+                        },
+                        confirmButton = { TextButton(onClick = { setupInfo = false }) { Text("OK", color = Sand) } },
+                    )
+                }
             }
         }
+    }
+
+    // ------------------------------------------------------------------ Spotify
+
+    private var openSpotifyAfterLogin = false
+    private var openSpotifyScreen: (() -> Unit)? = null
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (handleSpotifyRedirect(intent)) openSpotifyScreen?.invoke()
+    }
+
+    private fun handleSpotifyRedirect(intent: Intent?): Boolean {
+        val uri: Uri = intent?.data ?: return false
+        if (!SpotifyRepository.isLoginRedirect(uri)) return false
+        intent.data = null // nicht noch einmal verarbeiten (z. B. nach Drehen)
+        SpotifyRepository.handleRedirect(uri)
+        openSpotifyAfterLogin = true
+        return true
+    }
+
+    private fun loginToSpotify() {
+        val url = Uri.parse(SpotifyRepository.loginUrl())
+        try {
+            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, url)
+        } catch (_: Exception) {
+            startActivity(Intent(Intent.ACTION_VIEW, url))
+        }
+    }
+
+    private fun startSpotifyMix() {
+        // Radio anhalten, Spotify übernimmt
+        withController { c -> if (c.playWhenReady) c.pause() }
+        SpotifyRepository.startMix(this)
     }
 
     override fun onStart() {

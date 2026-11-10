@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +60,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
+import io.github.haigerman.hyperradio.R
+import io.github.haigerman.hyperradio.spotify.SpotifyRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.haigerman.hyperradio.data.PlaybackStatus
 import io.github.haigerman.hyperradio.data.PlayerPhase
@@ -67,7 +71,7 @@ import io.github.haigerman.hyperradio.data.Station
 import io.github.haigerman.hyperradio.data.isValidStreamUrl
 
 @Composable
-fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit) {
+fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpotifyClick: () -> Unit) {
     val stations by RadioRepository.stations.collectAsStateWithLifecycle()
     val status by RadioRepository.status.collectAsStateWithLifecycle()
 
@@ -97,6 +101,7 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit) {
                         StationCard(s, status, onClick = { onStationClick(s.id) }, onEdit = { editingId = s.id })
                     }
                 }
+                item(key = "spotify") { SpotifyCard(onClick = onSpotifyClick) }
                 item(key = "add") { AddCard(onClick = { adding = true }) }
             }
             BottomPanel(stations, status, onPlayPause, Modifier.navigationBarsPadding())
@@ -221,7 +226,7 @@ private fun StationCard(
 
 /** Drei Balken, die zur laufenden Wiedergabe tanzen. */
 @Composable
-private fun Equalizer(active: Boolean, modifier: Modifier = Modifier) {
+private fun Equalizer(active: Boolean, modifier: Modifier = Modifier, color: Color = Sand) {
     val t = rememberInfiniteTransition(label = "eq")
     val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(420), RepeatMode.Reverse), label = "a")
     val b by t.animateFloat(1f, 0.3f, infiniteRepeatable(tween(560), RepeatMode.Reverse), label = "b")
@@ -231,11 +236,63 @@ private fun Equalizer(active: Boolean, modifier: Modifier = Modifier) {
         listOf(a, b, c).forEachIndexed { i, v ->
             val h = size.height * (if (active) v else 0.25f)
             drawRoundRect(
-                Sand,
+                color,
                 topLeft = Offset(i * 2 * w, size.height - h),
                 size = Size(w, h),
                 cornerRadius = CornerRadius(w / 2),
             )
+        }
+    }
+}
+
+/** Karte im Stil der Sender, führt zur Spotify-Zufallswiedergabe. */
+@Composable
+private fun SpotifyCard(onClick: () -> Unit) {
+    val sp by SpotifyRepository.state.collectAsStateWithLifecycle()
+    val playing = sp.mixActive && sp.playback?.isPlaying == true
+    val subtitle = when {
+        !sp.configured -> "Einrichtung nötig"
+        !sp.loggedIn -> "Tippen zum Anmelden"
+        playing && sp.playback?.track != null -> "${sp.playback?.track} · ${sp.playback?.artists}"
+        sp.selected.isEmpty() -> "Künstler auswählen"
+        else -> "${sp.selected.size} Künstler · Zufallswiedergabe"
+    }
+    val bg by animateColorAsState(if (playing) CardOn else Card.copy(alpha = 0.7f), label = "bg")
+    Surface(
+        color = bg,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.06f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(painterResource(R.drawable.ic_spotify), contentDescription = "Spotify", modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Spotify-Mix", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    subtitle,
+                    fontSize = 13.sp,
+                    color = if (playing) SpotifyGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (playing) Equalizer(active = true, color = SpotifyGreen, modifier = Modifier.padding(start = 8.dp))
+            Text("›", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
         }
     }
 }
@@ -411,7 +468,7 @@ private fun BufferBar(status: PlaybackStatus) {
 }
 
 @Composable
-private fun PlayButton(playing: Boolean, live: Boolean, onClick: () -> Unit) {
+internal fun PlayButton(playing: Boolean, live: Boolean, onClick: () -> Unit) {
     val wave = rememberInfiniteTransition(label = "wave")
     // Funkwellen, die vom Knopf ausgehen, solange live gespielt wird
     val pulse by wave.animateFloat(
