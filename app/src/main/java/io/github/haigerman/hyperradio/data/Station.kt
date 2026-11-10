@@ -63,6 +63,17 @@ object Presets {
                 "http://stream.streambase.ch/vrock/mp3-192/direct/",
             ),
         ),
+        Station(
+            id = "smooth-jazz",
+            name = "Smooth Jazz Radio DE",
+            subtitle = "Smooth Jazz · Lounge",
+            emoji = "🎷",
+            urls = listOf(
+                "https://stream.laut.fm/pure-smooth-jazz",
+                "https://pure-smooth-jazz.stream.laut.fm/pure-smooth-jazz",
+                "http://stream.laut.fm/pure-smooth-jazz",
+            ),
+        ),
     )
 }
 

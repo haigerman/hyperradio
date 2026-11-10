@@ -15,7 +15,7 @@ class StationTest {
 
     @Test
     fun presetsAreValid() {
-        assertEquals(4, Presets.all.size)
+        assertEquals(5, Presets.all.size)
         assertEquals(Presets.all.size, Presets.all.map { it.id }.toSet().size)
         Presets.all.forEach { s ->
             assertTrue(s.urls.isNotEmpty())
