@@ -55,11 +55,12 @@ object Presets {
         Station(
             id = "virgin",
             name = "Virgin Radio",
-            subtitle = "Virgin Radio UK · Pop & Rock",
+            subtitle = "Virgin Radio Switzerland · Rock",
             emoji = "🎧",
             urls = listOf(
-                "https://radio.virginradio.co.uk/stream",
-                "http://radio.virginradio.co.uk/stream",
+                "https://stream.streambase.ch/vrock/mp3-192/direct/",
+                "https://stream.streambase.ch/vrock/mp3-128/direct/",
+                "http://stream.streambase.ch/vrock/mp3-192/direct/",
             ),
         ),
     )
