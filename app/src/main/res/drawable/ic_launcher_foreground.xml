@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Sendemast, von dem Funkwellen nach links und rechts ausgehen -->
+    <!-- Mast -->
+    <path android:strokeColor="#FF7FD1AE" android:strokeWidth="4.0" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M54,54 L45,80 M54,54 L63,80 M48.5,70 L59.5,70" />
+    <!-- innere Wellen -->
+    <path android:strokeColor="#FFE8C77A" android:strokeWidth="4.0" android:strokeLineCap="round"
+        android:pathData="M63.19,40.29 A12,12 0 0,1 63.19,55.71 M44.81,40.29 A12,12 0 0,0 44.81,55.71" />
+    <!-- äußere Wellen -->
+    <path android:strokeColor="#FFFF8A65" android:strokeWidth="4.0" android:strokeLineCap="round"
+        android:pathData="M69.32,35.14 A20,20 0 0,1 69.32,60.86 M38.68,35.14 A20,20 0 0,0 38.68,60.86" />
+    <!-- Lichthof -->
+    <path android:fillColor="#4DE8C77A" android:pathData="M54,48 m-9,0 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0" />
+    <!-- leuchtender Kern -->
+    <path android:fillColor="#FFE8C77A" android:pathData="M54,48 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+</vector>
