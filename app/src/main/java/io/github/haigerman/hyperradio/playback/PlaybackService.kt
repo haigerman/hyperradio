@@ -176,7 +176,7 @@ class PlaybackService : MediaLibraryService() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // Abgriff des Audiosignals für Oszilloskop und Live-Cover
+        // Abgriff des Audiosignals für das Live-Cover
         val renderers = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: Context,

@@ -9,7 +9,7 @@ import java.nio.ByteOrder
 
 /**
  * Zapft das dekodierte Audiosignal ab (ohne Mikrofon-Berechtigung) und hält die letzten
- * Samples als Mono-Signal in einem Ringpuffer – für das Oszilloskop in der App und das Cover
+ * Samples als Mono-Signal in einem Ringpuffer – für die Welle im Cover
  * in Android Auto.
  */
 @OptIn(UnstableApi::class)

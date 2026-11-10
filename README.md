@@ -27,9 +27,6 @@ umbenennen, ändern oder löschen.
   den Sender, Sprachbefehl („Spiele Bayern 1 auf HyperRadio“), nach dem Einsteigen wird
   der letzte Sender angeboten
 - Anzeige des laufenden Titels, wenn der Sender ihn mitschickt
-- **Oszilloskop** in der App: die echte Wellenform des laufenden Senders, leuchtend mit
-  Farbverlauf und Nachglühen wie auf einem alten Röhrenschirm (getriggert, mit automatischer
-  Verstärkung, ohne Mikrofon-Berechtigung)
 - **Cover für Android Auto & Benachrichtigung:** Senderemoji, Name und die leuchtende Welle.
   Android Auto erlaubt Apps keine eigenen Animationen, deshalb wird das Cover alle 12 s und bei
   jedem neuen Titel mit einem frischen Schnappschuss der echten Welle neu gezeichnet
@@ -62,9 +59,8 @@ Die Werte stehen in `playback/PlaybackService.kt` (`MIN_BUFFER_MS` …).
 | `MainActivity.kt` | Startet die Oberfläche, steuert den Dienst über einen `MediaController` |
 | `ui/RadioScreen.kt` | Hauptbildschirm: Sender, Hinzufügen-Dialog, Play-Knopf, Puffer-Anzeige |
 | `playback/PlaybackService.kt` | Media3 `MediaLibraryService`: Player, Puffer, Wiederverbinden, Senderliste für Android Auto |
-| `playback/AudioTap.kt` | Greift das dekodierte Audiosignal ab (für Oszilloskop und Cover) |
+| `playback/AudioTap.kt` | Greift das dekodierte Audiosignal ab (für die Welle im Cover) |
 | `playback/CoverArt.kt` | Zeichnet die Cover mit Welle für Android Auto und Benachrichtigung |
-| `ui/Oscilloscope.kt` | Das animierte Oszilloskop in der App |
 | `playback/StreamResolver.kt` | Löst `.m3u`/`.pls`-Playlists zur eigentlichen Stream-Adresse auf |
 | `data/Station.kt` | Sender und die eingebauten Streams |
 | `data/RadioRepository.kt` | Gemeinsamer Zustand von UI und Dienst, gespeicherte eigene Sender |

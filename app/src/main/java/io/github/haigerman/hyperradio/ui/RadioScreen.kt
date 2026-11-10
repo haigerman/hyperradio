@@ -366,8 +366,6 @@ private fun BottomPanel(stations: List<Station>, status: PlaybackStatus, onPlayP
             modifier = Modifier.padding(top = 2.dp),
         )
         Spacer(Modifier.height(10.dp))
-        Oscilloscope(active = status.phase == PlayerPhase.PLAYING || status.phase == PlayerPhase.BUFFERING)
-        Spacer(Modifier.height(12.dp))
         val active = status.phase != PlayerPhase.IDLE && status.phase != PlayerPhase.PAUSED && status.phase != PlayerPhase.ERROR
         PlayButton(playing = active, live = status.phase == PlayerPhase.PLAYING, onClick = onPlayPause)
         Spacer(Modifier.height(8.dp))
