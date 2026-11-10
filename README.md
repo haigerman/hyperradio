@@ -8,7 +8,7 @@ Android-App für Webradio – auf dem Handy und in **Android Auto**.
 |---|---|
 | 🤘 **Radio Bob Live** | `streams.radiobob.de/bob-live` (MP3 192 kbit/s, Ausweich: 128 kbit/s) |
 | 🎸 **Radio Bob Grunge** | `streams.radiobob.de/bob-grunge` (MP3 192 kbit/s, Ausweich: 128 kbit/s) |
-| 🏔️ **Bayern 1** | BR-Stream Oberbayern über `dispatcher.rndfnk.com` (MP3 high, Ausweich: mid) |
+| 🏔️ **Bayern 1** | BR-Stream Oberbayern über `streams.br.de/bayern1obb_2.m3u` (Ausweich: `dispatcher.rndfnk.com`, MP3 high/mid) |
 | 🎧 **Virgin Radio** | Virgin Radio UK, `radio.virginradio.co.uk/stream` |
 
 Jeder eingebaute Sender hat mehrere Adressen. Fällt eine aus, wechselt die App automatisch

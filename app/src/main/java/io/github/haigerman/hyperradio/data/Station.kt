@@ -46,6 +46,7 @@ object Presets {
             subtitle = "Bayerischer Rundfunk · Oberbayern",
             emoji = "🏔️",
             urls = listOf(
+                "https://streams.br.de/bayern1obb_2.m3u",
                 "https://dispatcher.rndfnk.com/br/br1/obb/mp3/high",
                 "https://dispatcher.rndfnk.com/br/br1/obb/mp3/mid",
                 "http://dispatcher.rndfnk.com/br/br1/obb/mp3/mid",

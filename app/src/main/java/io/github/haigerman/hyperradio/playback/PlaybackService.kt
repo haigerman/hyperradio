@@ -390,7 +390,7 @@ class PlaybackService : MediaLibraryService() {
         val stations = RadioRepository.stations.value
         val start = stations.indexOfFirst { it.id == stationId }.coerceAtLeast(0)
         return io.submit<MediaSession.MediaItemsWithStartPosition> {
-            val items = stations.map { mediaItemFor(it, resolve = StreamResolver.looksLikePlaylist(it.urls.first())) }
+            val items = stations.map { mediaItemFor(it, resolve = true) }
             MediaSession.MediaItemsWithStartPosition(items, start, C.TIME_UNSET)
         }
     }
