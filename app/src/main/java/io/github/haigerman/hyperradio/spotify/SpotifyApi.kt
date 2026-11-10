@@ -31,7 +31,10 @@ class SpotifyException(val status: Int, val reason: String?, message: String) : 
  * SharedPreferences und erneuert den Access-Token automatisch. Alle Aufrufe blockieren –
  * nur im Hintergrund (Dispatchers.IO) verwenden.
  */
-class SpotifyApi(private val prefs: SharedPreferences) {
+class SpotifyApi(
+    private val prefs: SharedPreferences,
+    private val baseUrl: String = "https://api.spotify.com/v1",
+) {
 
     val isLoggedIn: Boolean get() = prefs.getString(KEY_REFRESH, null) != null
 
@@ -106,7 +109,7 @@ class SpotifyApi(private val prefs: SharedPreferences) {
     // ------------------------------------------------------------------ HTTP
 
     private fun call(method: String, path: String, body: JSONObject? = null, retried: Boolean = false): String {
-        val conn = (URL("https://api.spotify.com/v1$path").openConnection() as HttpURLConnection).apply {
+        val conn = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 15_000
             readTimeout = 20_000
@@ -164,13 +167,32 @@ class SpotifyApi(private val prefs: SharedPreferences) {
         return parseArtists(json.optJSONObject("artists")?.optJSONArray("items"))
     }
 
+    /**
+     * GET mit Seitengröße: Spotify hat für Apps im Development Mode die erlaubte Seitengröße
+     * mancher Endpunkte gesenkt (z. B. Suche: höchstens 10). Lehnt Spotify die große Seite ab,
+     * wird für diesen Endpunkt dauerhaft auf 10 umgeschaltet.
+     */
+    private fun getPaged(key: String, path: (limit: Int) -> String): JSONObject {
+        val limit = pageLimits[key] ?: 50
+        return try {
+            JSONObject(call("GET", path(limit)))
+        } catch (e: SpotifyException) {
+            if (e.status != 400 || limit <= 10) throw e
+            pageLimits[key] = 10
+            JSONObject(call("GET", path(10)))
+        }
+    }
+
+    private val pageLimits = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     /** Gefolgte Künstler (alle Seiten). */
     fun followedArtists(max: Int = 500): List<SpotifyArtist> {
         val out = mutableListOf<SpotifyArtist>()
         var after: String? = null
         while (out.size < max) {
-            val path = "/me/following?type=artist&limit=50" + (after?.let { "&after=${q(it)}" } ?: "")
-            val artists = JSONObject(call("GET", path)).optJSONObject("artists") ?: break
+            val artists = getPaged("following") { l ->
+                "/me/following?type=artist&limit=$l" + (after?.let { "&after=${q(it)}" } ?: "")
+            }.optJSONObject("artists") ?: break
             out += parseArtists(artists.optJSONArray("items"))
             after = artists.optJSONObject("cursors")?.optString("after")?.takeIf { it.isNotEmpty() && it != "null" } ?: break
         }
@@ -178,8 +200,17 @@ class SpotifyApi(private val prefs: SharedPreferences) {
     }
 
     /** Meistgehörte Künstler (ca. letztes halbes Jahr). */
-    fun topArtists(): List<SpotifyArtist> =
-        parseArtists(JSONObject(call("GET", "/me/top/artists?limit=50&time_range=medium_term")).optJSONArray("items"))
+    fun topArtists(): List<SpotifyArtist> {
+        val out = mutableListOf<SpotifyArtist>()
+        var offset = 0
+        while (out.size < 50) {
+            val items = getPaged("top") { l -> "/me/top/artists?limit=$l&offset=$offset&time_range=medium_term" }.optJSONArray("items")
+            if (items == null || items.length() == 0) break
+            out += parseArtists(items)
+            offset += items.length()
+        }
+        return out
+    }
 
     private fun parseArtists(items: JSONArray?): List<SpotifyArtist> {
         if (items == null) return emptyList()
@@ -198,13 +229,17 @@ class SpotifyApi(private val prefs: SharedPreferences) {
     // ------------------------------------------------------------------ Titel
 
     /**
-     * Bis zu [max] Titel-URIs eines Künstlers: seine bekanntesten Titel plus Treffer aus der
-     * Titelsuche (nur Titel, an denen der Künstler wirklich beteiligt ist; doppelte Fassungen
-     * wie "Live"/"Remastered" desselben Titels werden zusammengefasst).
+     * Bis zu [max] Titel-URIs eines Künstlers aus drei Quellen (jede darf fehlschlagen –
+     * Spotify schränkt einzelne Endpunkte für neue Apps ein):
+     * 1. seine bekanntesten Titel, 2. die Titelsuche, 3. seine Alben und Singles.
+     * Nur Titel, an denen der Künstler wirklich beteiligt ist; verschiedene Fassungen desselben
+     * Titels ("Live", "Remastered" …) zählen einmal. Liefert keine Quelle etwas, wird Spotifys
+     * Fehler weitergereicht.
      */
     fun tracksOf(artist: SpotifyArtist, max: Int = 100): List<String> {
         val seenNames = HashSet<String>()
         val uris = LinkedHashSet<String>()
+        val errors = mutableListOf<Exception>()
         fun add(track: JSONObject) {
             val artists = track.optJSONArray("artists") ?: return
             val involved = (0 until artists.length()).any { artists.optJSONObject(it)?.optString("id") == artist.id }
@@ -213,20 +248,61 @@ class SpotifyApi(private val prefs: SharedPreferences) {
             val uri = track.optString("uri")
             if (uri.startsWith("spotify:track:") && seenNames.add(base)) uris += uri
         }
-        runCatching {
-            val top = JSONObject(call("GET", "/artists/${artist.id}/top-tracks?market=from_token")).optJSONArray("tracks")
-            if (top != null) for (i in 0 until top.length()) top.optJSONObject(i)?.let(::add)
+        fun addAll(items: JSONArray?) {
+            if (items != null) for (i in 0 until items.length()) items.optJSONObject(i)?.let(::add)
         }
-        var offset = 0
-        while (uris.size < max && offset < 200) {
-            val res = runCatching {
-                JSONObject(call("GET", "/search?type=track&limit=50&offset=$offset&market=from_token&q=${q("artist:\"${artist.name}\"")}"))
-                    .optJSONObject("tracks")?.optJSONArray("items")
-            }.getOrNull() ?: break
-            if (res.length() == 0) break
-            for (i in 0 until res.length()) res.optJSONObject(i)?.let(::add)
-            offset += 50
+
+        // 1. bekannteste Titel (für neue Apps teils gesperrt – deshalb zählt dieser Fehler zuletzt)
+        var topError: Exception? = null
+        try {
+            addAll(JSONObject(call("GET", "/artists/${artist.id}/top-tracks?market=from_token")).optJSONArray("tracks"))
+        } catch (e: Exception) {
+            topError = e
         }
+
+        // 2. Titelsuche (erst mit Künstler-Filter, notfalls nur mit dem Namen)
+        for (query in listOf("artist:\"${artist.name}\"", artist.name)) {
+            var offset = 0
+            var pages = 0
+            while (uris.size < max && pages < 12 && offset < 300) {
+                val items = try {
+                    getPaged("search-track") { l -> "/search?type=track&limit=$l&offset=$offset&market=from_token&q=${q(query)}" }
+                        .optJSONObject("tracks")?.optJSONArray("items")
+                } catch (e: Exception) {
+                    errors += e
+                    null
+                } ?: break
+                if (items.length() == 0) break
+                addAll(items)
+                offset += items.length()
+                pages++
+            }
+            if (uris.size >= 20) break
+        }
+
+        // 3. Alben und Singles
+        if (uris.size < max / 2) {
+            try {
+                val albums = mutableListOf<String>()
+                var offset = 0
+                while (albums.size < 30) {
+                    val items = getPaged("artist-albums") { l ->
+                        "/artists/${artist.id}/albums?include_groups=album,single&market=from_token&limit=$l&offset=$offset"
+                    }.optJSONArray("items")
+                    if (items == null || items.length() == 0) break
+                    for (i in 0 until items.length()) items.optJSONObject(i)?.optString("id")?.takeIf { it.isNotEmpty() }?.let(albums::add)
+                    offset += items.length()
+                }
+                for (album in albums.shuffled()) {
+                    if (uris.size >= max) break
+                    addAll(getPaged("album-tracks") { l -> "/albums/$album/tracks?market=from_token&limit=$l" }.optJSONArray("items"))
+                }
+            } catch (e: Exception) {
+                errors += e
+            }
+        }
+
+        if (uris.isEmpty()) (errors.firstOrNull() ?: topError)?.let { throw it }
         return uris.take(max)
     }
 

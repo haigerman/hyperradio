@@ -46,7 +46,12 @@ Gut zu wissen:
 
 - Nötig sind **Spotify Premium** und die installierte Spotify-App. Spotify gibt seinen Ton nicht
   an fremde Apps heraus – HyperRadio wählt die Titel aus, abgespielt wird in Spotify.
-  In Android Auto erscheint die Wiedergabe deshalb unter Spotify.
+  In Android Auto steht „Spotify-Mix“ in der Senderliste von HyperRadio (auch per Sprache:
+  „Spiele Spotify-Mix auf HyperRadio“): Antippen hält das Radio an und startet den Mix mit den
+  am Handy gewählten Künstlern; die Anzeige wechselt dann zu Spotify.
+- Titelquellen je Künstler: bekannteste Titel, Titelsuche, Alben und Singles. Spotify schränkt
+  für Apps im Development Mode einzelne Endpunkte ein (z. B. höchstens 10 Treffer pro Seite) –
+  HyperRadio stellt sich automatisch darauf ein.
 - Die Anmeldung läuft über Spotifys offizielles Verfahren für Apps (OAuth mit PKCE).
   HyperRadio bekommt dein Passwort nie zu sehen, nur ein Zugangs-Token.
 

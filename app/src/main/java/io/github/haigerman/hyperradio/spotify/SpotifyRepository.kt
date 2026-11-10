@@ -159,10 +159,17 @@ object SpotifyRepository {
      * Sammelt Titel aller gewählten Künstler, mischt sie und startet sie in der Spotify-App
      * auf diesem Handy. Ist Spotify noch nicht bereit, wird die App geöffnet und kurz gewartet.
      */
-    fun startMix(context: Context) {
+    fun startMix(context: Context, onDone: ((error: String?) -> Unit)? = null) {
         val artists = _state.value.selected
-        if (artists.isEmpty()) {
-            _state.update { it.copy(message = "Wähle zuerst mindestens einen Künstler") }
+        val problem = when {
+            !SpotifyConfig.isConfigured -> "Spotify ist nicht eingerichtet"
+            !api.isLoggedIn -> "Bitte zuerst am Handy bei Spotify anmelden"
+            artists.isEmpty() -> "Wähle zuerst am Handy mindestens einen Künstler"
+            else -> null
+        }
+        if (problem != null) {
+            _state.update { it.copy(message = problem) }
+            onDone?.invoke(problem)
             return
         }
         val app = context.applicationContext
@@ -190,24 +197,42 @@ object SpotifyRepository {
                 withContext(Dispatchers.IO) { api.play(device.id, uris) }
                 prefs.edit().putBoolean(KEY_MIX_ACTIVE, true).apply()
                 _state.update { it.copy(busy = null, mixActive = true) }
+                onDone?.invoke(null)
                 delay(1500)
                 refreshPlayback()
             } catch (e: Exception) {
                 _state.update { it.copy(busy = null, message = e.message) }
+                onDone?.invoke(e.message ?: "Spotify-Mix konnte nicht gestartet werden")
             }
         }
     }
 
     private suspend fun collectTracks(artists: List<SpotifyArtist>): Map<String, List<String>> {
         val gate = Semaphore(3) // nicht zu viele Anfragen gleichzeitig
-        return kotlinx.coroutines.coroutineScope {
+        var firstError: Exception? = null
+        val pool = kotlinx.coroutines.coroutineScope {
             artists.map { a ->
                 async {
-                    a.id to (trackCache[a.id] ?: gate.withPermit { runCatching { api.tracksOf(a) }.getOrDefault(emptyList()) }
-                        .also { if (it.isNotEmpty()) synchronized(trackCache) { trackCache[a.id] = it } })
+                    val cached = synchronized(trackCache) { trackCache[a.id] }
+                    val tracks = cached ?: gate.withPermit {
+                        try {
+                            api.tracksOf(a)
+                        } catch (e: Exception) {
+                            if (firstError == null) firstError = e
+                            emptyList()
+                        }
+                    }
+                    if (tracks.isNotEmpty()) synchronized(trackCache) { trackCache[a.id] = tracks }
+                    a.id to tracks
                 }
             }.awaitAll().toMap()
         }
+        if (pool.values.all { it.isEmpty() }) {
+            throw IllegalStateException(
+                "Keine abspielbaren Titel gefunden" + (firstError?.message?.let { " – Spotify meldet: $it" } ?: ""),
+            )
+        }
+        return pool
     }
 
     /** Das Spotify-Gerät dieses Handys (nicht etwa der PC, auf dem gerade Spotify läuft). */
@@ -227,7 +252,9 @@ object SpotifyRepository {
         val intent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
             ?: throw IllegalStateException("Die Spotify-App ist nicht installiert")
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
+        // aus dem Hintergrund (z. B. im Auto) kann Android das verhindern – dann warten wir trotzdem,
+        // oft läuft Spotify ohnehin schon (Android Auto verbindet sich mit allen Medien-Apps)
+        runCatching { context.startActivity(intent) }
     }
 
     fun togglePause() {
