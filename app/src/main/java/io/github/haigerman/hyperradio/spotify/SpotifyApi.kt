@@ -15,7 +15,14 @@ data class SpotifyArtist(
     val followers: Int = 0,
 )
 
-data class SpotifyDevice(val id: String, val name: String, val type: String, val isActive: Boolean)
+data class SpotifyDevice(
+    val id: String,
+    val name: String,
+    val type: String,
+    val isActive: Boolean,
+    /** Spotify erlaubt auf diesem Gerät keine Fernsteuerung */
+    val isRestricted: Boolean = false,
+)
 
 data class SpotifyPlayback(
     val track: String?,
@@ -34,6 +41,7 @@ class SpotifyException(val status: Int, val reason: String?, message: String) : 
 class SpotifyApi(
     private val prefs: SharedPreferences,
     private val baseUrl: String = "https://api.spotify.com/v1",
+    private val sleep: (Long) -> Unit = { Thread.sleep(it) },
 ) {
 
     val isLoggedIn: Boolean get() = prefs.getString(KEY_REFRESH, null) != null
@@ -127,19 +135,22 @@ class SpotifyApi(
             code == 401 && !retried -> return call(method, path, body, retried = true)
             code == 429 && !retried -> {
                 val wait = conn.getHeaderField("Retry-After")?.toLongOrNull() ?: 2
-                Thread.sleep(wait.coerceIn(1, 10) * 1000)
+                sleep(wait.coerceIn(1, 10) * 1000)
                 return call(method, path, body, retried = true)
             }
         }
         val err = runCatching { JSONObject(text).optJSONObject("error") }.getOrNull()
         val reason = err?.optString("reason")?.takeIf { it.isNotEmpty() }
+        // Spotifys eigene Meldung immer mitgeben – sonst lässt sich ein Fehler aus der Ferne nicht klären
+        val detail = "HTTP $code" + (err?.optString("message")?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: "") +
+            (reason?.let { " [$it]" } ?: "")
         val msg = when {
-            reason == "PREMIUM_REQUIRED" || (code == 403 && path.startsWith("/me/player")) ->
-                "Für die Wiedergabe über HyperRadio ist Spotify Premium nötig"
-            reason == "NO_ACTIVE_DEVICE" || code == 404 && path.startsWith("/me/player") ->
-                "Spotify ist auf diesem Handy nicht bereit – öffne kurz die Spotify-App"
-            code == 403 -> "Spotify verweigert den Zugriff (403) – ist dein Konto im Entwicklerportal unter „User Management“ eingetragen?"
-            else -> "Spotify-Fehler $code ${err?.optString("message") ?: ""}".trim()
+            reason == "PREMIUM_REQUIRED" -> "Für die Wiedergabe über HyperRadio ist Spotify Premium nötig ($detail)"
+            reason == "NO_ACTIVE_DEVICE" || (code == 404 && path.startsWith("/me/player")) ->
+                "Spotify auf diesem Handy reagiert nicht ($detail)"
+            code == 403 && !path.startsWith("/me/player") ->
+                "Spotify verweigert den Zugriff ($detail) – ist dein Konto im Entwicklerportal unter „User Management“ eingetragen?"
+            else -> "Spotify-Fehler ($detail)"
         }
         throw SpotifyException(code, reason, msg)
     }
@@ -313,15 +324,63 @@ class SpotifyApi(
         return (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("id").takeIf { it.isNotEmpty() && it != "null" } ?: return@mapNotNull null
-            SpotifyDevice(id, o.optString("name"), o.optString("type"), o.optBoolean("is_active"))
+            SpotifyDevice(id, o.optString("name"), o.optString("type"), o.optBoolean("is_active"), o.optBoolean("is_restricted"))
         }
     }
 
-    fun play(deviceId: String, uris: List<String>) {
-        // eigene Zufallsreihenfolge → Spotifys Shuffle aus, damit sie nicht nochmal umgewürfelt wird
-        runCatching { call("PUT", "/me/player/shuffle?state=false&device_id=${q(deviceId)}") }
-        call("PUT", "/me/player/play?device_id=${q(deviceId)}", JSONObject().put("uris", JSONArray(uris)))
-        runCatching { call("PUT", "/me/player/repeat?state=off&device_id=${q(deviceId)}") }
+    /**
+     * Startet die Titelliste auf dem Gerät, robust gegen die üblichen Stolpersteine:
+     * 1. Wiedergabe erst auf das Gerät übertragen – sonst verwirft die Handy-App den Befehl oft,
+     *    wenn sie gerade nicht aktiv ist.
+     * 2. Abspielen mehrmals versuchen (kurz nach dem Start meldet Spotify "Gerät nicht gefunden");
+     *    lehnt Spotify die Liste als zu lang ab, mit kürzerer Liste.
+     * 3. Nachsehen, ob wirklich ein Titel aus der Liste läuft; sonst noch einmal anstoßen.
+     * Gibt zurück, ob die Wiedergabe bestätigt wurde.
+     */
+    fun startPlayback(deviceId: String, uris: List<String>): Boolean {
+        val dev = q(deviceId)
+        // 1. übertragen (Fehler hier sind nicht schlimm – Schritt 2 sagt, ob es geht)
+        runCatching { call("PUT", "/me/player", JSONObject().put("device_ids", JSONArray(listOf(deviceId))).put("play", false)) }
+        sleep(800)
+        runCatching { call("PUT", "/me/player/shuffle?state=false&device_id=$dev") }
+
+        // 2. abspielen
+        var list = uris
+        var lastError: SpotifyException? = null
+        var attempt = 0
+        while (attempt < 4) {
+            try {
+                call("PUT", "/me/player/play?device_id=$dev", JSONObject().put("uris", JSONArray(list)))
+                lastError = null
+                break
+            } catch (e: SpotifyException) {
+                lastError = e
+                when {
+                    (e.status == 400 || e.status == 413) && list.size > 20 -> list = list.take(if (list.size > 50) 50 else 20)
+                    e.status == 404 || e.status == 502 || e.status == 503 || e.status == 500 -> {
+                        attempt++
+                        sleep(1500L * attempt)
+                        runCatching { call("PUT", "/me/player", JSONObject().put("device_ids", JSONArray(listOf(deviceId))).put("play", false)) }
+                    }
+                    else -> throw e
+                }
+            }
+        }
+        lastError?.let { throw it }
+        runCatching { call("PUT", "/me/player/repeat?state=off&device_id=$dev") }
+
+        // 3. prüfen
+        val wanted = list.toHashSet()
+        repeat(3) { check ->
+            sleep(1200)
+            val state = runCatching { JSONObject(call("GET", "/me/player")) }.getOrNull()
+            val uri = state?.optJSONObject("item")?.optString("uri")
+            val playing = state?.optBoolean("is_playing") == true
+            val onDevice = state?.optJSONObject("device")?.optString("id") == deviceId
+            if (playing && onDevice && uri in wanted) return true
+            if (check == 1) runCatching { call("PUT", "/me/player/play?device_id=$dev", JSONObject()) }
+        }
+        return false
     }
 
     fun pause() {

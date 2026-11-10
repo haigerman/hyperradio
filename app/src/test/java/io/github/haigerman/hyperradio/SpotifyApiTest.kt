@@ -27,6 +27,12 @@ class SpotifyApiTest {
     private var topTracksAllowed = false
     private var searchAllowed = true
 
+    // Wiedergabe-Simulation
+    private var transferred = false
+    private var maxUris = 50
+    private var playingUri: String? = null
+    private var ignorePlay = false
+
     private val artist = SpotifyArtist("art1", "The Band")
 
     private fun track(i: Int, artistId: String = "art1") =
@@ -45,15 +51,30 @@ class SpotifyApiTest {
 
     private fun handle(socket: java.net.Socket) {
         val reader = socket.getInputStream().bufferedReader()
-        val target = reader.readLine()?.split(" ")?.getOrNull(1) ?: return
-        while (reader.readLine()?.isNotEmpty() == true) { /* Header überspringen */ }
+        val requestLine = reader.readLine()?.split(" ") ?: return
+        val method = requestLine[0]
+        val target = requestLine.getOrNull(1) ?: return
+        var length = 0
+        while (true) {
+            val h = reader.readLine() ?: break
+            if (h.isEmpty()) break
+            if (h.startsWith("Content-Length:", ignoreCase = true)) length = h.substringAfter(":").trim().toInt()
+        }
+        val buf = CharArray(length)
+        var read = 0
+        while (read < length) {
+            val r = reader.read(buf, read, length - read)
+            if (r < 0) break
+            read += r
+        }
+        val body = String(buf, 0, read)
         val path = target.substringBefore("?").removePrefix("/v1")
         val rawQuery = target.substringAfter("?", "")
         run {
             val params = rawQuery.split("&").filter { it.contains("=") }
                 .associate { it.substringBefore("=") to URLDecoder.decode(it.substringAfter("="), "UTF-8") }
             synchronized(requests) { requests += "$path?$rawQuery" }
-            val limit = params["limit"]?.toInt() ?: 20
+            val limit = params["limit"]?.toInt() ?: 0
             val offset = params["offset"]?.toInt() ?: 0
             val (code, body) = when {
                 limit > maxLimit -> 400 to """{"error":{"status":400,"message":"Invalid limit"}}"""
@@ -75,6 +96,26 @@ class SpotifyApiTest {
                     val n = path.removePrefix("/albums/alb").removeSuffix("/tracks").toInt()
                     200 to """{"items":[${(1..5).joinToString(",") { track(100 * n + it) }}]}"""
                 }
+                path == "/me/player" && method == "PUT" -> {
+                    transferred = true
+                    204 to ""
+                }
+                path == "/me/player/play" -> when {
+                    !transferred -> 404 to """{"error":{"status":404,"message":"Device not found"}}"""
+                    body.contains("uris") -> {
+                        val n = Regex("spotify:track:").findAll(body).count()
+                        if (n > maxUris) 400 to """{"error":{"status":400,"message":"Too many ids"}}"""
+                        else {
+                            if (!ignorePlay) playingUri = Regex("spotify:track:[a-z0-9]+").find(body)?.value
+                            204 to ""
+                        }
+                    }
+                    else -> 204 to ""
+                }
+                path == "/me/player" && method == "GET" ->
+                    if (playingUri == null) 204 to ""
+                    else 200 to """{"is_playing":true,"device":{"id":"dev1"},"item":{"uri":"$playingUri"}}"""
+                path.startsWith("/me/player/") -> 204 to ""
                 else -> 404 to """{"error":{"status":404,"message":"Not found"}}"""
             }
             val bytes = body.toByteArray()
@@ -88,7 +129,25 @@ class SpotifyApiTest {
     @After
     fun stop() = server.close()
 
-    private fun api() = SpotifyApi(FakePrefs(), "http://127.0.0.1:${server.localPort}/v1")
+    private fun api() = SpotifyApi(FakePrefs(), "http://127.0.0.1:${server.localPort}/v1", sleep = {})
+
+    private val mix = (1..100).map { "spotify:track:m$it" }
+
+    @Test
+    fun transfersFirstAndShortensTooLongList() {
+        assertTrue(api().startPlayback("dev1", mix))
+        assertEquals("spotify:track:m1", playingUri)
+        // erst übertragen, dann abspielen
+        val firstTransfer = requests.indexOfFirst { it.startsWith("/me/player?") }
+        val firstPlay = requests.indexOfFirst { it.startsWith("/me/player/play") }
+        assertTrue(firstTransfer in 0 until firstPlay)
+    }
+
+    @Test
+    fun reportsWhenSpotifyAcceptsButDoesNotPlay() {
+        ignorePlay = true
+        assertEquals(false, api().startPlayback("dev1", mix.take(10)))
+    }
 
     @Test
     fun fallsBackToSmallPagesWhenTopTracksAreForbidden() {

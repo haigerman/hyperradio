@@ -192,11 +192,29 @@ object SpotifyRepository {
                         if (device != null) break
                     }
                 }
-                if (device == null) throw IllegalStateException("Spotify-App nicht gefunden – bitte Spotify einmal öffnen und erneut tippen")
+                if (device == null) {
+                    val seen = withContext(Dispatchers.IO) { runCatching { api.devices() }.getOrDefault(emptyList()) }
+                    throw IllegalStateException(
+                        "Spotify-App auf diesem Handy nicht gefunden – bitte Spotify einmal öffnen und erneut tippen" +
+                            if (seen.isEmpty()) " (Spotify meldet keine Geräte)"
+                            else " (Spotify kennt: ${seen.joinToString { "${it.name} [${it.type}]" }})",
+                    )
+                }
+                if (device.isRestricted) {
+                    throw IllegalStateException("Spotify erlaubt auf „${device.name}“ keine Fernsteuerung")
+                }
 
-                withContext(Dispatchers.IO) { api.play(device.id, uris) }
+                _state.update { it.copy(busy = "Starte ${uris.size} Titel auf „${device.name}“ …") }
+                val confirmed = withContext(Dispatchers.IO) { api.startPlayback(device.id, uris) }
                 prefs.edit().putBoolean(KEY_MIX_ACTIVE, true).apply()
-                _state.update { it.copy(busy = null, mixActive = true) }
+                _state.update {
+                    it.copy(
+                        busy = null,
+                        mixActive = true,
+                        message = if (confirmed) null
+                        else "Spotify hat die Liste angenommen, spielt aber noch nicht – öffne Spotify und tippe dort auf Play",
+                    )
+                }
                 onDone?.invoke(null)
                 delay(1500)
                 refreshPlayback()
