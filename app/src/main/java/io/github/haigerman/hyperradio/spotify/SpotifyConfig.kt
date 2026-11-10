@@ -7,7 +7,7 @@ package io.github.haigerman.hyperradio.spotify
  */
 object SpotifyConfig {
     /** Hier die Client ID der eigenen Spotify-App eintragen. */
-    const val CLIENT_ID = ""
+    const val CLIENT_ID = "f14cbf7e167f481bbbed6b762a9c6795"
 
     /** Muss im Spotify-Entwicklerportal genau so als Redirect URI eingetragen sein. */
     const val REDIRECT_URI = "hyperradio://spotify-callback"
