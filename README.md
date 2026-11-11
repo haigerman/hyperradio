@@ -15,6 +15,10 @@ Android-App für Webradio – auf dem Handy und in **Android Auto**.
 Jeder eingebaute Sender hat mehrere Adressen. Fällt eine aus, wechselt die App automatisch
 zur nächsten. Die Liste steht in `data/Station.kt` (`Presets`).
 
+**Reihenfolge ändern:** Lange auf einen Sender drücken, bis er sich anhebt, dann an die
+gewünschte Stelle ziehen. Die Reihenfolge wird gespeichert und gilt auch in Android Auto
+(Senderliste und Weiter/Zurück).
+
 **Eigene Sender:** Unten in der Liste auf **＋ Sender hinzufügen** tippen, Name und
 Stream-URL eingeben – fertig. Neben direkten Streams (MP3/AAC/Ogg) gehen auch
 Playlist-Links (`.m3u`, `.pls`) und HLS (`.m3u8`). Über ✎ lassen sich eigene Sender

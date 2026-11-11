@@ -59,3 +59,15 @@ class StationTest {
         assertNull(StreamResolver.parsePlaylist("<html>nope</html>"))
     }
 }
+
+class StationOrderTest {
+    private fun st(id: String) = io.github.haigerman.hyperradio.data.Station(id, id, listOf("http://x/$id"), "", "📻")
+
+    @Test
+    fun appliesSavedOrderAndAppendsNewStations() {
+        val stations = listOf(st("a"), st("b"), st("c"), st("new"))
+        val ordered = RadioRepository.applyOrder(stations, listOf("c", "a", "gone", "b"))
+        assertEquals(listOf("c", "a", "b", "new"), ordered.map { it.id })
+        assertEquals(stations, RadioRepository.applyOrder(stations, emptyList()))
+    }
+}

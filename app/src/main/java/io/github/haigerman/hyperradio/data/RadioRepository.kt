@@ -51,7 +51,7 @@ object RadioRepository {
         if (prefs != null) return
         val p = context.applicationContext.getSharedPreferences("radio", Context.MODE_PRIVATE)
         prefs = p
-        _stations.value = Presets.all + decodeCustom(p.getString(KEY_CUSTOM, null))
+        _stations.value = applyOrder(Presets.all + decodeCustom(p.getString(KEY_CUSTOM, null)), decodeOrder(p.getString(KEY_ORDER, null)))
         _status.update { it.copy(stationId = lastStationId) }
     }
 
@@ -80,6 +80,12 @@ object RadioRepository {
         saveCustom()
     }
 
+    /** Neue Reihenfolge der Sender (per Ziehen in der Liste); gilt auch für Android Auto. */
+    fun setOrder(ids: List<String>) {
+        _stations.update { applyOrder(it, ids) }
+        prefs?.edit()?.putString(KEY_ORDER, JSONArray(_stations.value.map { it.id }).toString())?.apply()
+    }
+
     fun publishStatus(status: PlaybackStatus) {
         _status.value = status
     }
@@ -90,6 +96,7 @@ object RadioRepository {
 
     private const val KEY_CUSTOM = "custom_stations"
     private const val KEY_LAST = "last_station"
+    private const val KEY_ORDER = "station_order"
     private const val CUSTOM_PREFIX = "custom-"
 
     internal fun customStation(id: String, name: String, url: String): Station {
@@ -103,6 +110,23 @@ object RadioRepository {
             emoji = "📻",
             custom = true,
         )
+    }
+
+    /**
+     * Sortiert nach der gespeicherten Reihenfolge. Sender, die darin noch nicht vorkommen
+     * (neu eingebaut oder neu hinzugefügt), kommen in ihrer ursprünglichen Reihenfolge ans Ende.
+     */
+    internal fun applyOrder(stations: List<Station>, order: List<String>): List<Station> {
+        if (order.isEmpty()) return stations
+        val pos = order.withIndex().associate { (i, id) -> id to i }
+        val (known, unknown) = stations.partition { it.id in pos }
+        return known.sortedBy { pos.getValue(it.id) } + unknown
+    }
+
+    private fun decodeOrder(json: String?): List<String> = try {
+        if (json.isNullOrBlank()) emptyList() else JSONArray(json).let { a -> (0 until a.length()).map { a.getString(it) } }
+    } catch (_: Exception) {
+        emptyList()
     }
 
     internal fun encodeCustom(list: List<Station>): String = JSONArray().apply {

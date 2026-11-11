@@ -28,6 +28,11 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -85,21 +90,44 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
     ) {
         Column(Modifier.fillMaxSize()) {
             Header(Modifier.statusBarsPadding())
-            val presets = stations.filterNot { it.custom }
-            val custom = stations.filter { it.custom }
+            // lokale Kopie, damit die Karten beim Ziehen sofort mitwandern; gespeichert wird beim Loslassen
+            var ordered by remember(stations) { mutableStateOf(stations) }
+            val listState = rememberLazyListState()
+            val reorder = rememberReorderState(
+                listState = listState,
+                canMove = { it in ordered.indices },
+                onMove = { from, to ->
+                    ordered = ordered.toMutableList().apply { add(to, removeAt(from)) }
+                },
+            )
             LazyColumn(
-                modifier = Modifier.weight(1f),
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .reorderable(reorder, onDragEnd = { RadioRepository.setOrder(ordered.map { it.id }) }),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(presets, key = { it.id }) { s ->
-                    StationCard(s, status, onClick = { onStationClick(s.id) })
-                }
-                if (custom.isNotEmpty()) {
-                    item(key = "custom-label") { SectionLabel("Eigene Sender") }
-                    items(custom, key = { it.id }) { s ->
-                        StationCard(s, status, onClick = { onStationClick(s.id) }, onEdit = { editingId = s.id })
-                    }
+                itemsIndexed(ordered, key = { _, s -> s.id }) { index, s ->
+                    val dragging = reorder.draggingIndex == index
+                    val lift by animateFloatAsState(if (dragging) 1f else 0f, label = "lift")
+                    StationCard(
+                        s,
+                        status,
+                        onClick = { if (!reorder.clicksSuppressed) onStationClick(s.id) },
+                        onEdit = if (s.custom) ({ if (!reorder.clicksSuppressed) editingId = s.id }) else null,
+                        modifier = (if (dragging) Modifier else Modifier.animateItem())
+                            .zIndex(if (dragging) 1f else 0f)
+                            .graphicsLayer {
+                                translationY = if (dragging) reorder.draggingOffset else 0f
+                                scaleX = 1f + 0.03f * lift
+                                scaleY = 1f + 0.03f * lift
+                                shadowElevation = 16.dp.toPx() * lift
+                                shape = RoundedCornerShape(20.dp)
+                                clip = false
+                            },
+                        lifted = lift,
+                    )
                 }
                 item(key = "spotify") { SpotifyCard(onClick = onSpotifyClick) }
                 item(key = "add") { AddCard(onClick = { adding = true }) }
@@ -146,21 +174,11 @@ private fun Header(modifier: Modifier = Modifier) {
     Column(modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 8.dp)) {
         Text("HyperRadio", fontSize = 30.sp, fontWeight = FontWeight.Light, color = MaterialTheme.colorScheme.onSurface)
         Text(
-            "Wähle einen Sender",
+            "Wähle einen Sender · lange drücken zum Verschieben",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text,
-        fontSize = 13.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 8.dp, top = 10.dp),
-    )
 }
 
 @Composable
@@ -169,13 +187,18 @@ private fun StationCard(
     status: PlaybackStatus,
     onClick: () -> Unit,
     onEdit: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    /** 0 = normal, 1 = beim Verschieben angehoben */
+    lifted: Float = 0f,
 ) {
     val selected = status.stationId == station.id && status.phase != PlayerPhase.IDLE
-    val bg by animateColorAsState(if (selected) CardOn else Card.copy(alpha = 0.7f), label = "bg")
+    val base by animateColorAsState(if (selected) CardOn else Card.copy(alpha = 0.7f), label = "bg")
+    val bg = lerp(base, CardOn, lifted)
     Surface(
         color = bg,
         shape = RoundedCornerShape(20.dp),
-        modifier = Modifier
+        border = if (lifted > 0f) BorderStroke(1.dp, Sand.copy(alpha = 0.5f * lifted)) else null,
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick),
