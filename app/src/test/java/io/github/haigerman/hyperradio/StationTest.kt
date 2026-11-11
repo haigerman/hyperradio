@@ -15,7 +15,7 @@ class StationTest {
 
     @Test
     fun presetsAreValid() {
-        assertEquals(6, Presets.all.size)
+        assertEquals(7, Presets.all.size)
         assertEquals(Presets.all.size, Presets.all.map { it.id }.toSet().size)
         Presets.all.forEach { s ->
             assertTrue(s.urls.isNotEmpty())
@@ -78,5 +78,13 @@ class StationOrderTest {
         // gespeicherte Reihenfolge aus der Zeit vor dem neuen Sender
         val ordered = RadioRepository.applyOrder(stations, listOf("c", custom.id, "a", "b"))
         assertEquals(listOf("kexp", "c", custom.id, "a", "b"), ordered.map { it.id })
+    }
+
+    @Test
+    fun newLastPresetGoesToTheVeryEnd() {
+        val custom = RadioRepository.customStation("1", "Mein", "http://x/m")
+        val stations = listOf(st("a"), st("b"), st("space"), custom)
+        val ordered = RadioRepository.applyOrder(stations, listOf("b", custom.id, "a"))
+        assertEquals(listOf("b", custom.id, "a", "space"), ordered.map { it.id })
     }
 }

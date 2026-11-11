@@ -12,6 +12,7 @@ Android-App für Webradio – auf dem Handy und in **Android Auto**.
 | 🏔️ **Bayern 1** | BR-Stream Oberbayern über `streams.br.de/bayern1obb_2.m3u` (Ausweich: `dispatcher.rndfnk.com`, MP3 high/mid) |
 | 🎧 **Virgin Radio** | Virgin Radio Switzerland, `stream.streambase.ch/vrock` (MP3 192 kbit/s, Ausweich: 128 kbit/s) |
 | 🎷 **Smooth Jazz Radio DE** | smooth-jazz-radio.de über laut.fm, `stream.laut.fm/pure-smooth-jazz` |
+| 🌌 **SomaFM – Deep Space One** | `ice1.somafm.com/deepspaceone-128-mp3` (MP3 128 kbit/s, Ausweich: ice2/ice4 und `somafm.com/deepspaceone.pls`) |
 
 Jeder eingebaute Sender hat mehrere Adressen. Fällt eine aus, wechselt die App automatisch
 zur nächsten. Die Liste steht in `data/Station.kt` (`Presets`).

@@ -114,15 +114,20 @@ object RadioRepository {
 
     /**
      * Sortiert nach der gespeicherten Reihenfolge. Sender, die darin noch nicht vorkommen:
-     * neu eingebaute kommen an ihren vorgesehenen Platz (ihre Position in [stations]),
-     * neu hinzugefügte eigene Sender ans Ende.
+     * neu eingebaute kommen an ihren vorgesehenen Platz (ihre Position in [stations]) – steht
+     * hinter ihnen kein bereits bekannter eingebauter Sender, ganz ans Ende; neu hinzugefügte
+     * eigene Sender ans Ende.
      */
     internal fun applyOrder(stations: List<Station>, order: List<String>): List<Station> {
         if (order.isEmpty()) return stations
         val pos = order.withIndex().associate { (i, id) -> id to i }
         val (known, unknown) = stations.partition { it.id in pos }
         val result = known.sortedBy { pos.getValue(it.id) }.toMutableList()
-        unknown.filterNot { it.custom }.forEach { s -> result.add(stations.indexOf(s).coerceAtMost(result.size), s) }
+        unknown.filterNot { it.custom }.forEach { s ->
+            val i = stations.indexOf(s)
+            val lastPreset = stations.drop(i + 1).none { !it.custom && it.id in pos }
+            result.add(if (lastPreset) result.size else i.coerceAtMost(result.size), s)
+        }
         result += unknown.filter { it.custom }
         return result
     }

@@ -85,6 +85,18 @@ object Presets {
                 "http://stream.laut.fm/pure-smooth-jazz",
             ),
         ),
+        Station(
+            id = "somafm-deepspaceone",
+            name = "SomaFM – Deep Space One",
+            subtitle = "SomaFM · Ambient & Space Music",
+            emoji = "🌌",
+            urls = listOf(
+                "https://ice1.somafm.com/deepspaceone-128-mp3",
+                "https://ice2.somafm.com/deepspaceone-128-mp3",
+                "https://ice4.somafm.com/deepspaceone-128-mp3",
+                "https://somafm.com/deepspaceone.pls",
+            ),
+        ),
     )
 }
 
