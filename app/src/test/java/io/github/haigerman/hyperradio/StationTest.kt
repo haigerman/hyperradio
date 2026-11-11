@@ -1,5 +1,6 @@
 package io.github.haigerman.hyperradio
 
+import io.github.haigerman.hyperradio.data.Category
 import io.github.haigerman.hyperradio.data.Presets
 import io.github.haigerman.hyperradio.data.RadioRepository
 import io.github.haigerman.hyperradio.data.hostOf
@@ -15,7 +16,7 @@ class StationTest {
 
     @Test
     fun presetsAreValid() {
-        assertEquals(7, Presets.all.size)
+        assertEquals(8, Presets.all.size)
         assertEquals(Presets.all.size, Presets.all.map { it.id }.toSet().size)
         Presets.all.forEach { s ->
             assertTrue(s.urls.isNotEmpty())
@@ -78,6 +79,26 @@ class StationOrderTest {
         // gespeicherte Reihenfolge aus der Zeit vor dem neuen Sender
         val ordered = RadioRepository.applyOrder(stations, listOf("c", custom.id, "a", "b"))
         assertEquals(listOf("kexp", "c", custom.id, "a", "b"), ordered.map { it.id })
+    }
+
+    @Test
+    fun categoriesAsRequested() {
+        val byCat = Presets.all.groupBy({ it.category }, { it.id })
+        assertEquals(listOf("kexp", "bob-live", "bob-grunge", "virgin"), byCat[Category.ROCK])
+        assertEquals(listOf("smooth-jazz", "somafm-deepspaceone", "lofi-hiphop"), byCat[Category.WORK])
+        assertEquals(listOf("bayern1"), byCat[Category.OTHER])
+    }
+
+    @Test
+    fun arrangeGroupsByCategoryKeepingOrder() {
+        val custom = RadioRepository.customStation("1", "Mein Rock", "http://x/m", Category.ROCK)
+        val list = listOf(st("o1"), Presets.all.first { it.id == "smooth-jazz" }, custom, Presets.all.first { it.id == "kexp" })
+        assertEquals(listOf(custom.id, "kexp", "smooth-jazz", "o1"), RadioRepository.arrange(list).map { it.id })
+        // Kategorie eigener Sender wird gespeichert
+        val decoded = RadioRepository.decodeCustom(RadioRepository.encodeCustom(listOf(custom)))
+        assertEquals(Category.ROCK, decoded.single().category)
+        // alte Einträge ohne Kategorie landen bei "Übrige"
+        assertEquals(Category.OTHER, RadioRepository.decodeCustom("[{\"id\":\"custom-9\",\"name\":\"A\",\"url\":\"http://a/b\"}]").single().category)
     }
 
     @Test

@@ -13,13 +13,27 @@ data class Station(
     val subtitle: String,
     val emoji: String,
     val custom: Boolean = false,
+    val category: Category = Category.OTHER,
 )
+
+/** Ausklappbare Gruppen der Senderliste (in dieser Reihenfolge; auch die Tabs in Android Auto). */
+enum class Category(val id: String, val title: String, val emoji: String) {
+    ROCK("rock", "Rock", "🎸"),
+    WORK("work", "Work", "💼"),
+    OTHER("other", "Übrige", "📻"),
+    ;
+
+    companion object {
+        fun fromId(id: String?): Category = entries.firstOrNull { it.id == id } ?: OTHER
+    }
+}
 
 /** Fest eingebaute Sender. */
 object Presets {
     val all: List<Station> = listOf(
         Station(
             id = "kexp",
+            category = Category.ROCK,
             name = "KEXP 90.3 FM",
             subtitle = "Seattle · Indie & Alternative",
             emoji = "🌲",
@@ -31,6 +45,7 @@ object Presets {
         ),
         Station(
             id = "bob-live",
+            category = Category.ROCK,
             name = "Radio Bob Live",
             subtitle = "RADIO BOB! · Rock",
             emoji = "🤘",
@@ -42,6 +57,7 @@ object Presets {
         ),
         Station(
             id = "bob-grunge",
+            category = Category.ROCK,
             name = "Radio Bob Grunge",
             subtitle = "RADIO BOB! · Grunge",
             emoji = "🎸",
@@ -53,6 +69,7 @@ object Presets {
         ),
         Station(
             id = "bayern1",
+            category = Category.OTHER,
             name = "Bayern 1",
             subtitle = "Bayerischer Rundfunk · Oberbayern",
             emoji = "🏔️",
@@ -65,6 +82,7 @@ object Presets {
         ),
         Station(
             id = "virgin",
+            category = Category.ROCK,
             name = "Virgin Radio",
             subtitle = "Virgin Radio Switzerland · Rock",
             emoji = "🎧",
@@ -76,6 +94,7 @@ object Presets {
         ),
         Station(
             id = "smooth-jazz",
+            category = Category.WORK,
             name = "Smooth Jazz Radio DE",
             subtitle = "Smooth Jazz · Lounge",
             emoji = "🎷",
@@ -87,6 +106,7 @@ object Presets {
         ),
         Station(
             id = "somafm-deepspaceone",
+            category = Category.WORK,
             name = "SomaFM – Deep Space One",
             subtitle = "SomaFM · Ambient & Space Music",
             emoji = "🌌",
@@ -95,6 +115,18 @@ object Presets {
                 "https://ice2.somafm.com/deepspaceone-128-mp3",
                 "https://ice4.somafm.com/deepspaceone-128-mp3",
                 "https://somafm.com/deepspaceone.pls",
+            ),
+        ),
+        Station(
+            id = "lofi-hiphop",
+            category = Category.WORK,
+            name = "Lofi Hip Hop Radio",
+            subtitle = "Lofi Hip Hop · Beats zum Arbeiten",
+            emoji = "🎧",
+            urls = listOf(
+                "https://stream.laut.fm/lofi",
+                "https://play.streamafrica.net/lofiradio",
+                "http://stream.laut.fm/lofi",
             ),
         ),
     )

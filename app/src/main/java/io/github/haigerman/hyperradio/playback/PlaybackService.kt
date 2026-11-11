@@ -41,6 +41,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import io.github.haigerman.hyperradio.BuildConfig
 import io.github.haigerman.hyperradio.MainActivity
 import io.github.haigerman.hyperradio.R
+import io.github.haigerman.hyperradio.data.Category
 import io.github.haigerman.hyperradio.data.PlaybackStatus
 import io.github.haigerman.hyperradio.data.PlayerPhase
 import io.github.haigerman.hyperradio.data.RadioRepository
@@ -546,10 +547,13 @@ class PlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            val list = when (parentId) {
-                ROOT_ID -> RadioRepository.stations.value.map(::browseItem) +
-                    listOfNotNull(if (SpotifyConfig.isConfigured) spotifyItem() else null)
-                RECENT_ID -> listOfNotNull(RadioRepository.find(RadioRepository.lastStationId) ?: RadioRepository.stations.value.firstOrNull())
+            val category = Category.entries.firstOrNull { CATEGORY_PREFIX + it.id == parentId }
+            val list = when {
+                // Kategorien → in Android Auto als Tabs oben
+                parentId == ROOT_ID -> Category.entries.map { folder(CATEGORY_PREFIX + it.id, it.title) }
+                category != null -> RadioRepository.stations.value.filter { it.category == category }.map(::browseItem) +
+                    listOfNotNull(if (category == Category.OTHER && SpotifyConfig.isConfigured) spotifyItem() else null)
+                parentId == RECENT_ID -> listOfNotNull(RadioRepository.find(RadioRepository.lastStationId) ?: RadioRepository.stations.value.firstOrNull())
                     .map(::browseItem)
                 else -> return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_BAD_VALUE))
             }
@@ -562,6 +566,9 @@ class PlaybackService : MediaLibraryService() {
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> {
             if (mediaId == SPOTIFY_ID) return Futures.immediateFuture(LibraryResult.ofItem(spotifyItem(), null))
+            Category.entries.firstOrNull { CATEGORY_PREFIX + it.id == mediaId }?.let {
+                return Futures.immediateFuture(LibraryResult.ofItem(folder(mediaId, it.title), null))
+            }
             val station = RadioRepository.find(mediaId)
                 ?: return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_BAD_VALUE))
             return Futures.immediateFuture(LibraryResult.ofItem(browseItem(station), null))
@@ -669,6 +676,7 @@ class PlaybackService : MediaLibraryService() {
 
         private const val ROOT_ID = "root"
         private const val SPOTIFY_ID = "spotify-mix"
+        private const val CATEGORY_PREFIX = "cat-"
         private const val RECENT_ID = "recent"
         private const val CONTENT_STYLE_PLAYABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
         private const val CONTENT_STYLE_LIST = 1

@@ -29,6 +29,7 @@ class ReorderState internal constructor(
     val listState: LazyListState,
     private val scope: CoroutineScope,
     private val canMove: (Int) -> Boolean,
+    private val canDrop: (from: Int, to: Int) -> Boolean,
     private val onMove: (from: Int, to: Int) -> Unit,
 ) {
     var draggingIndex by mutableStateOf<Int?>(null)
@@ -69,7 +70,7 @@ class ReorderState internal constructor(
         val top = startOffset + dragDistance
         val middle = top + current.size / 2f
         val target = listState.layoutInfo.visibleItemsInfo.firstOrNull {
-            it.index != index && middle.toInt() in it.offset..(it.offset + it.size) && canMove(it.index)
+            it.index != index && middle.toInt() in it.offset..(it.offset + it.size) && canMove(it.index) && canDrop(index, it.index)
         }
         if (target != null) {
             // Wird der oberste sichtbare Eintrag verschoben, würde die Liste mitspringen – Position halten
@@ -103,13 +104,15 @@ class ReorderState internal constructor(
 fun rememberReorderState(
     listState: LazyListState,
     canMove: (Int) -> Boolean,
+    canDrop: (from: Int, to: Int) -> Boolean = { _, _ -> true },
     onMove: (from: Int, to: Int) -> Unit,
 ): ReorderState {
     val scope = rememberCoroutineScope()
     val currentCanMove by rememberUpdatedState(canMove)
+    val currentCanDrop by rememberUpdatedState(canDrop)
     val currentOnMove by rememberUpdatedState(onMove)
     return remember(listState) {
-        ReorderState(listState, scope, { currentCanMove(it) }, { a, b -> currentOnMove(a, b) })
+        ReorderState(listState, scope, { currentCanMove(it) }, { a, b -> currentCanDrop(a, b) }, { a, b -> currentOnMove(a, b) })
     }
 }
 

@@ -44,6 +44,10 @@ object RadioRepository {
     private val _status = MutableStateFlow(PlaybackStatus())
     val status: StateFlow<PlaybackStatus> = _status.asStateFlow()
 
+    /** Zugeklappte Kategorien (ids) */
+    private val _collapsed = MutableStateFlow<Set<String>>(emptySet())
+    val collapsed: StateFlow<Set<String>> = _collapsed.asStateFlow()
+
     private var prefs: SharedPreferences? = null
 
     @Synchronized
@@ -51,7 +55,8 @@ object RadioRepository {
         if (prefs != null) return
         val p = context.applicationContext.getSharedPreferences("radio", Context.MODE_PRIVATE)
         prefs = p
-        _stations.value = applyOrder(Presets.all + decodeCustom(p.getString(KEY_CUSTOM, null)), decodeOrder(p.getString(KEY_ORDER, null)))
+        _stations.value = arrange(applyOrder(Presets.all + decodeCustom(p.getString(KEY_CUSTOM, null)), decodeOrder(p.getString(KEY_ORDER, null))))
+        _collapsed.value = p.getStringSet(KEY_COLLAPSED, emptySet())!!.toSet()
         _status.update { it.copy(stationId = lastStationId) }
     }
 
@@ -63,16 +68,28 @@ object RadioRepository {
             prefs?.edit()?.putString(KEY_LAST, value)?.apply()
         }
 
-    fun addCustom(name: String, url: String): Station {
-        val s = customStation(UUID.randomUUID().toString(), name, url)
-        _stations.update { it + s }
+    fun addCustom(name: String, url: String, category: Category = Category.OTHER): Station {
+        val s = customStation(UUID.randomUUID().toString(), name, url, category)
+        _stations.update { arrange(it + s) }
         saveCustom()
         return s
     }
 
-    fun updateCustom(id: String, name: String, url: String) {
-        _stations.update { list -> list.map { if (it.id == id && it.custom) customStation(id, name, url) else it } }
+    fun updateCustom(id: String, name: String, url: String, category: Category) {
+        _stations.update { list ->
+            val old = list.firstOrNull { it.id == id }
+            val updated = list.map { if (it.id == id && it.custom) customStation(id, name, url, category) else it }
+            // in eine andere Kategorie verschoben → dort ans Ende
+            if (old != null && old.category != category) arrange(updated.filterNot { it.id == id } + updated.first { it.id == id })
+            else arrange(updated)
+        }
         saveCustom()
+        saveOrder()
+    }
+
+    fun toggleCategory(category: Category) {
+        _collapsed.update { if (category.id in it) it - category.id else it + category.id }
+        prefs?.edit()?.putStringSet(KEY_COLLAPSED, _collapsed.value)?.apply()
     }
 
     fun removeCustom(id: String) {
@@ -82,9 +99,16 @@ object RadioRepository {
 
     /** Neue Reihenfolge der Sender (per Ziehen in der Liste); gilt auch für Android Auto. */
     fun setOrder(ids: List<String>) {
-        _stations.update { applyOrder(it, ids) }
+        _stations.update { arrange(applyOrder(it, ids)) }
+        saveOrder()
+    }
+
+    private fun saveOrder() {
         prefs?.edit()?.putString(KEY_ORDER, JSONArray(_stations.value.map { it.id }).toString())?.apply()
     }
+
+    /** Nach Kategorien gruppiert; innerhalb einer Kategorie bleibt die Reihenfolge erhalten. */
+    internal fun arrange(list: List<Station>): List<Station> = list.sortedBy { it.category.ordinal }
 
     fun publishStatus(status: PlaybackStatus) {
         _status.value = status
@@ -97,9 +121,10 @@ object RadioRepository {
     private const val KEY_CUSTOM = "custom_stations"
     private const val KEY_LAST = "last_station"
     private const val KEY_ORDER = "station_order"
+    private const val KEY_COLLAPSED = "collapsed_categories"
     private const val CUSTOM_PREFIX = "custom-"
 
-    internal fun customStation(id: String, name: String, url: String): Station {
+    internal fun customStation(id: String, name: String, url: String, category: Category = Category.OTHER): Station {
         val cleanUrl = url.trim()
         val fullId = if (id.startsWith(CUSTOM_PREFIX)) id else CUSTOM_PREFIX + id
         return Station(
@@ -109,6 +134,7 @@ object RadioRepository {
             subtitle = hostOf(cleanUrl),
             emoji = "📻",
             custom = true,
+            category = category,
         )
     }
 
@@ -139,7 +165,7 @@ object RadioRepository {
     }
 
     internal fun encodeCustom(list: List<Station>): String = JSONArray().apply {
-        list.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.urls.first())) }
+        list.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.urls.first()).put("category", it.category.id)) }
     }.toString()
 
     internal fun decodeCustom(json: String?): List<Station> {
@@ -151,7 +177,7 @@ object RadioRepository {
                 val url = o.optString("url")
                 val name = o.optString("name")
                 if (name.isBlank() || !isValidStreamUrl(url)) null
-                else customStation(o.optString("id", UUID.randomUUID().toString()), name, url)
+                else customStation(o.optString("id", UUID.randomUUID().toString()), name, url, Category.fromId(o.optString("category", "")))
             }
         } catch (_: Exception) {
             emptyList()

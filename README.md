@@ -13,12 +13,20 @@ Android-App für Webradio – auf dem Handy und in **Android Auto**.
 | 🎧 **Virgin Radio** | Virgin Radio Switzerland, `stream.streambase.ch/vrock` (MP3 192 kbit/s, Ausweich: 128 kbit/s) |
 | 🎷 **Smooth Jazz Radio DE** | smooth-jazz-radio.de über laut.fm, `stream.laut.fm/pure-smooth-jazz` |
 | 🌌 **SomaFM – Deep Space One** | `ice1.somafm.com/deepspaceone-128-mp3` (MP3 128 kbit/s, Ausweich: ice2/ice4 und `somafm.com/deepspaceone.pls`) |
+| 🎧 **Lofi Hip Hop Radio** | Lofi-Hip-Hop über laut.fm, `stream.laut.fm/lofi` (Ausweich: `play.streamafrica.net/lofiradio`) |
 
 Jeder eingebaute Sender hat mehrere Adressen. Fällt eine aus, wechselt die App automatisch
 zur nächsten. Die Liste steht in `data/Station.kt` (`Presets`).
 
+**Kategorien:** Die Sender sind in ausklappbare Gruppen sortiert – 🎸 **Rock** (KEXP,
+Radio Bob Live, Radio Bob Grunge, Virgin Radio), 💼 **Work** (Smooth Jazz, SomaFM, Lofi Hip
+Hop Radio) und 📻 **Übrige** (Bayern 1, Spotify-Mix). Antippen der Überschrift klappt eine
+Gruppe auf oder zu (wird gespeichert); läuft ein Sender in einer zugeklappten Gruppe, zeigt die
+Überschrift das an. Eigene Sender ordnet man beim Hinzufügen/Bearbeiten einer Gruppe zu. In
+Android Auto erscheinen die Gruppen als Tabs.
+
 **Reihenfolge ändern:** Lange auf einen Sender drücken, bis er sich anhebt, dann an die
-gewünschte Stelle ziehen. Die Reihenfolge wird gespeichert und gilt auch in Android Auto
+gewünschte Stelle innerhalb der Gruppe ziehen. Die Reihenfolge wird gespeichert und gilt auch in Android Auto
 (Senderliste und Weiter/Zurück).
 
 **Eigene Sender:** Unten in der Liste auf **＋ Sender hinzufügen** tippen, Name und

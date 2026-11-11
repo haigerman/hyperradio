@@ -37,6 +37,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -69,6 +71,7 @@ import androidx.compose.ui.res.painterResource
 import io.github.haigerman.hyperradio.R
 import io.github.haigerman.hyperradio.spotify.SpotifyRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.haigerman.hyperradio.data.Category
 import io.github.haigerman.hyperradio.data.PlaybackStatus
 import io.github.haigerman.hyperradio.data.PlayerPhase
 import io.github.haigerman.hyperradio.data.RadioRepository
@@ -90,14 +93,24 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
     ) {
         Column(Modifier.fillMaxSize()) {
             Header(Modifier.statusBarsPadding())
+            val collapsed by RadioRepository.collapsed.collectAsStateWithLifecycle()
             // lokale Kopie, damit die Karten beim Ziehen sofort mitwandern; gespeichert wird beim Loslassen
             var ordered by remember(stations) { mutableStateOf(stations) }
+            val rows = buildRows(ordered, collapsed)
             val listState = rememberLazyListState()
             val reorder = rememberReorderState(
                 listState = listState,
-                canMove = { it in ordered.indices },
+                canMove = { rows.getOrNull(it) is ListRow.StationRow },
+                // nur innerhalb der eigenen Kategorie verschieben
+                canDrop = { from, to ->
+                    val a = rows.getOrNull(from) as? ListRow.StationRow
+                    val b = rows.getOrNull(to) as? ListRow.StationRow
+                    a != null && b != null && a.station.category == b.station.category
+                },
                 onMove = { from, to ->
-                    ordered = ordered.toMutableList().apply { add(to, removeAt(from)) }
+                    val a = (rows[from] as ListRow.StationRow).station
+                    val b = (rows[to] as ListRow.StationRow).station
+                    ordered = ordered.toMutableList().apply { add(indexOf(b), removeAt(indexOf(a))) }
                 },
             )
             LazyColumn(
@@ -108,29 +121,40 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                itemsIndexed(ordered, key = { _, s -> s.id }) { index, s ->
-                    val dragging = reorder.draggingIndex == index
-                    val lift by animateFloatAsState(if (dragging) 1f else 0f, label = "lift")
-                    StationCard(
-                        s,
-                        status,
-                        onClick = { if (!reorder.clicksSuppressed) onStationClick(s.id) },
-                        onEdit = if (s.custom) ({ if (!reorder.clicksSuppressed) editingId = s.id }) else null,
-                        modifier = (if (dragging) Modifier else Modifier.animateItem())
-                            .zIndex(if (dragging) 1f else 0f)
-                            .graphicsLayer {
-                                translationY = if (dragging) reorder.draggingOffset else 0f
-                                scaleX = 1f + 0.03f * lift
-                                scaleY = 1f + 0.03f * lift
-                                shadowElevation = 16.dp.toPx() * lift
-                                shape = RoundedCornerShape(20.dp)
-                                clip = false
-                            },
-                        lifted = lift,
-                    )
+                itemsIndexed(rows, key = { _, r -> r.key }) { index, row ->
+                    when (row) {
+                        is ListRow.Header -> CategoryHeader(
+                            row = row,
+                            playing = status.phase != PlayerPhase.IDLE && ordered.any { it.id == status.stationId && it.category == row.category },
+                            onClick = { RadioRepository.toggleCategory(row.category) },
+                            modifier = Modifier.animateItem(),
+                        )
+                        is ListRow.StationRow -> {
+                            val s = row.station
+                            val dragging = reorder.draggingIndex == index
+                            val lift by animateFloatAsState(if (dragging) 1f else 0f, label = "lift")
+                            StationCard(
+                                s,
+                                status,
+                                onClick = { if (!reorder.clicksSuppressed) onStationClick(s.id) },
+                                onEdit = if (s.custom) ({ if (!reorder.clicksSuppressed) editingId = s.id }) else null,
+                                modifier = (if (dragging) Modifier else Modifier.animateItem())
+                                    .zIndex(if (dragging) 1f else 0f)
+                                    .graphicsLayer {
+                                        translationY = if (dragging) reorder.draggingOffset else 0f
+                                        scaleX = 1f + 0.03f * lift
+                                        scaleY = 1f + 0.03f * lift
+                                        shadowElevation = 16.dp.toPx() * lift
+                                        shape = RoundedCornerShape(20.dp)
+                                        clip = false
+                                    },
+                                lifted = lift,
+                            )
+                        }
+                        ListRow.Spotify -> SpotifyCard(onClick = onSpotifyClick, modifier = Modifier.animateItem())
+                        ListRow.Add -> AddCard(onClick = { adding = true })
+                    }
                 }
-                item(key = "spotify") { SpotifyCard(onClick = onSpotifyClick) }
-                item(key = "add") { AddCard(onClick = { adding = true }) }
             }
             BottomPanel(stations, status, onPlayPause, Modifier.navigationBarsPadding())
         }
@@ -142,8 +166,11 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
             initialName = "",
             initialUrl = "",
             confirmLabel = "Hinzufügen",
-            onConfirm = { name, url ->
-                RadioRepository.addCustom(name, url)
+            initialCategory = Category.OTHER,
+            onConfirm = { name, url, category ->
+                RadioRepository.addCustom(name, url, category)
+                // Kategorie aufklappen, damit man den neuen Sender sieht
+                if (category.id in RadioRepository.collapsed.value) RadioRepository.toggleCategory(category)
                 adding = false
             },
             onDismiss = { adding = false },
@@ -156,8 +183,10 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
             initialName = editing.name,
             initialUrl = editing.urls.first(),
             confirmLabel = "Speichern",
-            onConfirm = { name, url ->
-                RadioRepository.updateCustom(editing.id, name, url)
+            initialCategory = editing.category,
+            onConfirm = { name, url, category ->
+                RadioRepository.updateCustom(editing.id, name, url, category)
+                if (category.id in RadioRepository.collapsed.value) RadioRepository.toggleCategory(category)
                 editingId = null
             },
             onDelete = {
@@ -169,12 +198,88 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
     }
 }
 
+/** Zeilen der Senderliste: Kategorie-Kopf, Sender, Spotify-Karte, Hinzufügen. */
+private sealed interface ListRow {
+    val key: String
+
+    data class Header(val category: Category, val count: Int, val expanded: Boolean) : ListRow {
+        override val key = "cat-" + category.id
+    }
+
+    data class StationRow(val station: Station) : ListRow {
+        override val key = station.id
+    }
+
+    data object Spotify : ListRow {
+        override val key = "spotify"
+    }
+
+    data object Add : ListRow {
+        override val key = "add"
+    }
+}
+
+private fun buildRows(stations: List<Station>, collapsed: Set<String>): List<ListRow> = buildList {
+    Category.entries.forEach { cat ->
+        val members = stations.filter { it.category == cat }
+        val withSpotify = cat == Category.OTHER
+        val expanded = cat.id !in collapsed
+        add(ListRow.Header(cat, members.size + if (withSpotify) 1 else 0, expanded))
+        if (expanded) {
+            members.forEach { add(ListRow.StationRow(it)) }
+            if (withSpotify) add(ListRow.Spotify)
+        }
+    }
+    add(ListRow.Add)
+}
+
+/** Kopf einer Kategorie – Antippen klappt sie auf oder zu. */
+@Composable
+private fun CategoryHeader(row: ListRow.Header, playing: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val arrow by animateFloatAsState(if (row.expanded) 0f else -90f, label = "arrow")
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+    ) {
+        Text(row.category.emoji, fontSize = 18.sp)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            row.category.title,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (playing) Sand else MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            Modifier
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.08f))
+                .padding(horizontal = 8.dp, vertical = 1.dp),
+        ) {
+            Text("${row.count}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (playing && !row.expanded) Equalizer(active = true, modifier = Modifier.padding(start = 10.dp))
+        Spacer(Modifier.weight(1f))
+        Text(
+            "▾",
+            fontSize = 20.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.graphicsLayer { rotationZ = arrow },
+        )
+    }
+}
+
 @Composable
 private fun Header(modifier: Modifier = Modifier) {
     Column(modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 8.dp)) {
         Text("HyperRadio", fontSize = 30.sp, fontWeight = FontWeight.Light, color = MaterialTheme.colorScheme.onSurface)
         Text(
-            "Wähle einen Sender · lange drücken zum Verschieben",
+            "Sender lange drücken zum Verschieben",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -270,7 +375,7 @@ private fun Equalizer(active: Boolean, modifier: Modifier = Modifier, color: Col
 
 /** Karte im Stil der Sender, führt zur Spotify-Zufallswiedergabe. */
 @Composable
-private fun SpotifyCard(onClick: () -> Unit) {
+private fun SpotifyCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val sp by SpotifyRepository.state.collectAsStateWithLifecycle()
     val playing = sp.mixActive && sp.playback?.isPlaying == true
     val subtitle = when {
@@ -284,9 +389,8 @@ private fun SpotifyCard(onClick: () -> Unit) {
     Surface(
         color = bg,
         shape = RoundedCornerShape(20.dp),
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(top = 6.dp)
             .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick),
     ) {
@@ -350,12 +454,14 @@ private fun StationDialog(
     initialName: String,
     initialUrl: String,
     confirmLabel: String,
-    onConfirm: (name: String, url: String) -> Unit,
+    initialCategory: Category,
+    onConfirm: (name: String, url: String, category: Category) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)? = null,
 ) {
     var name by rememberSaveable { mutableStateOf(initialName) }
     var url by rememberSaveable { mutableStateOf(initialUrl) }
+    var category by rememberSaveable { mutableStateOf(initialCategory) }
     var tried by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val nameOk = name.isNotBlank()
@@ -401,6 +507,20 @@ private fun StationDialog(
                     colors = fieldColors,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Text("Kategorie", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Category.entries.forEach { c ->
+                        FilterChip(
+                            selected = category == c,
+                            onClick = { category = c },
+                            label = { Text("${c.emoji} ${c.title}") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Sand.copy(alpha = 0.25f),
+                                selectedLabelColor = Sand,
+                            ),
+                        )
+                    }
+                }
                 if (onDelete != null) {
                     TextButton(onClick = { if (confirmDelete) onDelete() else confirmDelete = true }) {
                         Text(if (confirmDelete) "Wirklich löschen?" else "Sender löschen", color = Coral)
@@ -411,7 +531,7 @@ private fun StationDialog(
         confirmButton = {
             TextButton(onClick = {
                 tried = true
-                if (nameOk && urlOk) onConfirm(name, url)
+                if (nameOk && urlOk) onConfirm(name, url, category)
             }) { Text(confirmLabel, color = Sand) }
         },
         dismissButton = {
