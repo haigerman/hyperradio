@@ -18,12 +18,20 @@ Android-App für Webradio – auf dem Handy und in **Android Auto**.
 Jeder eingebaute Sender hat mehrere Adressen. Fällt eine aus, wechselt die App automatisch
 zur nächsten. Die Liste steht in `data/Station.kt` (`Presets`).
 
-**Kategorien:** Die Sender sind in ausklappbare Gruppen sortiert – 🎸 **Rock** (KEXP,
+**Kategorien:** Die Sender sind in ausklappbare Gruppen sortiert – anfangs 🎸 **Rock** (KEXP,
 Radio Bob Live, Radio Bob Grunge, Virgin Radio), 💼 **Work** (Smooth Jazz, SomaFM, Lofi Hip
 Hop Radio) und 📻 **Übrige** (Bayern 1, Spotify-Mix). Antippen der Überschrift klappt eine
 Gruppe auf oder zu (wird gespeichert); läuft ein Sender in einer zugeklappten Gruppe, zeigt die
-Überschrift das an. Eigene Sender ordnet man beim Hinzufügen/Bearbeiten einer Gruppe zu. In
-Android Auto erscheinen die Gruppen als Tabs.
+Überschrift das an. In Android Auto erscheinen die Gruppen als Tabs (höchstens 4 – bei mehr
+Kategorien bündelt der vierte Tab „Weitere“ den Rest).
+
+**Sender verwalten (⋮ an jeder Senderkarte):** Kategorie wechseln (auch direkt in eine neue
+Kategorie), eigene Sender bearbeiten, Sender löschen – mit „Rückgängig“. Auch eingebaute Sender
+lassen sich löschen; „Gelöschte Sender wiederherstellen“ am Listenende holt sie zurück.
+
+**Kategorien verwalten:** „＋ Kategorie“ am Listenende legt eine neue an (Name + Symbol).
+Über ⋮ an der Überschrift: umbenennen/Symbol ändern, nach oben/unten schieben, löschen – die
+Sender wandern dann nach „Übrige“, das als Sammelstelle immer bleibt.
 
 **Reihenfolge ändern:** Lange auf einen Sender drücken, bis er sich anhebt, dann an die
 gewünschte Stelle innerhalb der Gruppe ziehen. Die Reihenfolge wird gespeichert und gilt auch in Android Auto

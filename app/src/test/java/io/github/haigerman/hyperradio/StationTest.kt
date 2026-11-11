@@ -83,22 +83,22 @@ class StationOrderTest {
 
     @Test
     fun categoriesAsRequested() {
-        val byCat = Presets.all.groupBy({ it.category }, { it.id })
-        assertEquals(listOf("kexp", "bob-live", "bob-grunge", "virgin"), byCat[Category.ROCK])
-        assertEquals(listOf("smooth-jazz", "somafm-deepspaceone", "lofi-hiphop"), byCat[Category.WORK])
-        assertEquals(listOf("bayern1"), byCat[Category.OTHER])
+        val byCat = Presets.all.groupBy({ it.categoryId }, { it.id })
+        assertEquals(listOf("kexp", "bob-live", "bob-grunge", "virgin"), byCat[Category.ROCK_ID])
+        assertEquals(listOf("smooth-jazz", "somafm-deepspaceone", "lofi-hiphop"), byCat[Category.WORK_ID])
+        assertEquals(listOf("bayern1"), byCat[Category.OTHER_ID])
     }
 
     @Test
     fun arrangeGroupsByCategoryKeepingOrder() {
-        val custom = RadioRepository.customStation("1", "Mein Rock", "http://x/m", Category.ROCK)
+        val custom = RadioRepository.customStation("1", "Mein Rock", "http://x/m", Category.ROCK_ID)
         val list = listOf(st("o1"), Presets.all.first { it.id == "smooth-jazz" }, custom, Presets.all.first { it.id == "kexp" })
         assertEquals(listOf(custom.id, "kexp", "smooth-jazz", "o1"), RadioRepository.arrange(list).map { it.id })
         // Kategorie eigener Sender wird gespeichert
         val decoded = RadioRepository.decodeCustom(RadioRepository.encodeCustom(listOf(custom)))
-        assertEquals(Category.ROCK, decoded.single().category)
+        assertEquals(Category.ROCK_ID, decoded.single().categoryId)
         // alte Einträge ohne Kategorie landen bei "Übrige"
-        assertEquals(Category.OTHER, RadioRepository.decodeCustom("[{\"id\":\"custom-9\",\"name\":\"A\",\"url\":\"http://a/b\"}]").single().category)
+        assertEquals(Category.OTHER_ID, RadioRepository.decodeCustom("[{\"id\":\"custom-9\",\"name\":\"A\",\"url\":\"http://a/b\"}]").single().categoryId)
     }
 
     @Test
@@ -107,5 +107,67 @@ class StationOrderTest {
         val stations = listOf(st("a"), st("b"), st("space"), custom)
         val ordered = RadioRepository.applyOrder(stations, listOf("b", custom.id, "a"))
         assertEquals(listOf("b", custom.id, "a", "space"), ordered.map { it.id })
+    }
+}
+
+/** Löschen, Rückgängig, Kategorien – über das (nicht initialisierte, also nur im Speicher arbeitende) Repository. */
+class StationEditingTest {
+    private fun ids(cat: String) = RadioRepository.stations.value.filter { it.categoryId == cat }.map { it.id }
+
+    @Test
+    fun deleteUndoMoveAndCategories() {
+        val r = RadioRepository
+        val before = r.stations.value.map { it.id }
+
+        // löschen + rückgängig
+        r.deleteStation("bob-grunge")
+        assertNull(r.find("bob-grunge"))
+        assertEquals(1, r.hiddenCount.value)
+        r.undoDelete()
+        assertEquals(before, r.stations.value.map { it.id })
+        assertEquals(0, r.hiddenCount.value)
+
+        // löschen + wiederherstellen
+        r.deleteStation("virgin")
+        r.restoreHiddenPresets()
+        assertEquals(before, r.stations.value.map { it.id })
+
+        // in andere Kategorie verschieben → dort ans Ende
+        r.setStationCategory("bayern1", Category.ROCK_ID)
+        assertEquals(listOf("kexp", "bob-live", "bob-grunge", "virgin", "bayern1"), ids(Category.ROCK_ID))
+
+        // neue Kategorie kommt vor "Übrige", Sender hinein, Kategorie löschen → Sender nach "Übrige"
+        val sport = r.addCategory(" Sport ", "🏃")
+        assertEquals("Sport", sport.title)
+        assertEquals(listOf(Category.ROCK_ID, Category.WORK_ID, sport.id, Category.OTHER_ID), r.categories.value.map { it.id })
+        r.setStationCategory("kexp", sport.id)
+        assertEquals(listOf("kexp"), ids(sport.id))
+        r.moveCategory(sport.id, -2)
+        assertEquals(sport.id, r.categories.value.first().id)
+        assertEquals("kexp", r.stations.value.first().id) // Liste folgt der Kategorie-Reihenfolge
+        r.deleteCategory(sport.id)
+        assertEquals(Category.defaults.map { it.id }, r.categories.value.map { it.id })
+        assertEquals(Category.OTHER_ID, r.find("kexp")!!.categoryId)
+
+        // "Übrige" lässt sich nicht löschen
+        r.deleteCategory(Category.OTHER_ID)
+        assertTrue(r.categories.value.any { it.isFallback })
+
+        // eigene Sender löschen
+        val mine = r.addCustom("Mein", "http://x/y", Category.WORK_ID)
+        assertEquals(mine.id, ids(Category.WORK_ID).last())
+        r.deleteStation(mine.id)
+        assertNull(r.find(mine.id))
+        assertEquals(0, r.hiddenCount.value)
+    }
+
+    @Test
+    fun categoriesSurviveSaving() {
+        val cats = Category.defaults + Category("c-1", "Sport", "🏃")
+        assertEquals(cats, RadioRepository.decodeCategories(RadioRepository.encodeCategories(cats)))
+        // ohne "Übrige" gespeichert → wird ergänzt
+        val noOther = RadioRepository.decodeCategories(RadioRepository.encodeCategories(listOf(Category("c-1", "Sport", "🏃"))))
+        assertTrue(noOther.any { it.isFallback })
+        assertEquals(Category.defaults, RadioRepository.decodeCategories(null))
     }
 }

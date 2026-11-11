@@ -13,6 +13,20 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -81,10 +95,30 @@ import io.github.haigerman.hyperradio.data.isValidStreamUrl
 @Composable
 fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpotifyClick: () -> Unit) {
     val stations by RadioRepository.stations.collectAsStateWithLifecycle()
+    val categories by RadioRepository.categories.collectAsStateWithLifecycle()
+    val collapsed by RadioRepository.collapsed.collectAsStateWithLifecycle()
+    val hiddenCount by RadioRepository.hiddenCount.collectAsStateWithLifecycle()
     val status by RadioRepository.status.collectAsStateWithLifecycle()
 
+    // Dialoge und Menüs
     var adding by rememberSaveable { mutableStateOf(false) }
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var stationMenuId by rememberSaveable { mutableStateOf<String?>(null) }
+    var categoryMenuId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingCategoryId by rememberSaveable { mutableStateOf<String?>(null) }
+    var creatingCategory by rememberSaveable { mutableStateOf(false) }
+    /** Sender, der nach dem Anlegen einer neuen Kategorie in diese wandert */
+    var moveIntoNewCategory by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    fun notify(text: String, undo: (() -> Unit)? = null) {
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val result = snackbar.showSnackbar(text, actionLabel = if (undo != null) "Rückgängig" else null, duration = SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed) undo?.invoke()
+        }
+    }
 
     Box(
         Modifier
@@ -93,19 +127,18 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
     ) {
         Column(Modifier.fillMaxSize()) {
             Header(Modifier.statusBarsPadding())
-            val collapsed by RadioRepository.collapsed.collectAsStateWithLifecycle()
             // lokale Kopie, damit die Karten beim Ziehen sofort mitwandern; gespeichert wird beim Loslassen
             var ordered by remember(stations) { mutableStateOf(stations) }
-            val rows = buildRows(ordered, collapsed)
+            val rows = buildRows(ordered, categories, collapsed, hiddenCount)
             val listState = rememberLazyListState()
             val reorder = rememberReorderState(
                 listState = listState,
                 canMove = { rows.getOrNull(it) is ListRow.StationRow },
-                // nur innerhalb der eigenen Kategorie verschieben
+                // per Ziehen innerhalb der Kategorie; in andere Kategorien über das ⋮-Menü
                 canDrop = { from, to ->
                     val a = rows.getOrNull(from) as? ListRow.StationRow
                     val b = rows.getOrNull(to) as? ListRow.StationRow
-                    a != null && b != null && a.station.category == b.station.category
+                    a != null && b != null && a.station.categoryId == b.station.categoryId
                 },
                 onMove = { from, to ->
                     val a = (rows[from] as ListRow.StationRow).station
@@ -113,51 +146,150 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
                     ordered = ordered.toMutableList().apply { add(indexOf(b), removeAt(indexOf(a))) }
                 },
             )
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .reorderable(reorder, onDragEnd = { RadioRepository.setOrder(ordered.map { it.id }) }),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                itemsIndexed(rows, key = { _, r -> r.key }) { index, row ->
-                    when (row) {
-                        is ListRow.Header -> CategoryHeader(
-                            row = row,
-                            playing = status.phase != PlayerPhase.IDLE && ordered.any { it.id == status.stationId && it.category == row.category },
-                            onClick = { RadioRepository.toggleCategory(row.category) },
-                            modifier = Modifier.animateItem(),
-                        )
-                        is ListRow.StationRow -> {
-                            val s = row.station
-                            val dragging = reorder.draggingIndex == index
-                            val lift by animateFloatAsState(if (dragging) 1f else 0f, label = "lift")
-                            StationCard(
-                                s,
-                                status,
-                                onClick = { if (!reorder.clicksSuppressed) onStationClick(s.id) },
-                                onEdit = if (s.custom) ({ if (!reorder.clicksSuppressed) editingId = s.id }) else null,
-                                modifier = (if (dragging) Modifier else Modifier.animateItem())
-                                    .zIndex(if (dragging) 1f else 0f)
-                                    .graphicsLayer {
-                                        translationY = if (dragging) reorder.draggingOffset else 0f
-                                        scaleX = 1f + 0.03f * lift
-                                        scaleY = 1f + 0.03f * lift
-                                        shadowElevation = 16.dp.toPx() * lift
-                                        shape = RoundedCornerShape(20.dp)
-                                        clip = false
-                                    },
-                                lifted = lift,
+            Box(Modifier.weight(1f)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .reorderable(reorder, onDragEnd = { RadioRepository.setOrder(ordered.map { it.id }) }),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    itemsIndexed(rows, key = { _, r -> r.key }) { index, row ->
+                        when (row) {
+                            is ListRow.Header -> CategoryHeader(
+                                row = row,
+                                playing = status.phase != PlayerPhase.IDLE &&
+                                    ordered.any { it.id == status.stationId && it.categoryId == row.category.id },
+                                onClick = { RadioRepository.toggleCategory(row.category.id) },
+                                onMenu = { categoryMenuId = row.category.id },
+                                modifier = Modifier.animateItem(),
                             )
+                            is ListRow.StationRow -> {
+                                val s = row.station
+                                val dragging = reorder.draggingIndex == index
+                                val lift by animateFloatAsState(if (dragging) 1f else 0f, label = "lift")
+                                StationCard(
+                                    s,
+                                    status,
+                                    onClick = { if (!reorder.clicksSuppressed) onStationClick(s.id) },
+                                    onMenu = { if (!reorder.clicksSuppressed) stationMenuId = s.id },
+                                    modifier = (if (dragging) Modifier else Modifier.animateItem())
+                                        .zIndex(if (dragging) 1f else 0f)
+                                        .graphicsLayer {
+                                            translationY = if (dragging) reorder.draggingOffset else 0f
+                                            scaleX = 1f + 0.03f * lift
+                                            scaleY = 1f + 0.03f * lift
+                                            shadowElevation = 16.dp.toPx() * lift
+                                            shape = RoundedCornerShape(20.dp)
+                                            clip = false
+                                        },
+                                    lifted = lift,
+                                )
+                            }
+                            is ListRow.Empty -> EmptyCategoryHint(Modifier.animateItem())
+                            ListRow.Spotify -> SpotifyCard(onClick = onSpotifyClick, modifier = Modifier.animateItem())
+                            ListRow.Add -> AddButtons(onAddStation = { adding = true }, onAddCategory = { creatingCategory = true })
+                            is ListRow.Restore -> RestoreRow(row.count, onClick = {
+                                RadioRepository.restoreHiddenPresets()
+                                notify("Eingebaute Sender wiederhergestellt")
+                            })
                         }
-                        ListRow.Spotify -> SpotifyCard(onClick = onSpotifyClick, modifier = Modifier.animateItem())
-                        ListRow.Add -> AddCard(onClick = { adding = true })
                     }
+                }
+                SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp)) { data ->
+                    Snackbar(
+                        data,
+                        containerColor = CardOn,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        actionColor = Sand,
+                        shape = RoundedCornerShape(16.dp),
+                    )
                 }
             }
             BottomPanel(stations, status, onPlayPause, Modifier.navigationBarsPadding())
         }
+    }
+
+    // ---------------------------------------------------------------- Menüs & Dialoge
+
+    RadioRepository.find(stationMenuId)?.let { station ->
+        StationMenuSheet(
+            station = station,
+            categories = categories,
+            onDismiss = { stationMenuId = null },
+            onMoveTo = { cat ->
+                RadioRepository.setStationCategory(station.id, cat.id)
+                RadioRepository.expand(cat.id)
+                stationMenuId = null
+                notify("„${station.name}“ → ${cat.emoji} ${cat.title}")
+            },
+            onNewCategory = {
+                moveIntoNewCategory = station.id
+                creatingCategory = true
+                stationMenuId = null
+            },
+            onEdit = if (station.custom) ({ editingId = station.id; stationMenuId = null }) else null,
+            onDelete = {
+                stationMenuId = null
+                RadioRepository.deleteStation(station.id)
+                notify("„${station.name}“ gelöscht") { RadioRepository.undoDelete() }
+            },
+        )
+    }
+
+    categories.firstOrNull { it.id == categoryMenuId }?.let { cat ->
+        val index = categories.indexOf(cat)
+        CategoryMenuSheet(
+            category = cat,
+            count = stations.count { it.categoryId == cat.id },
+            canMoveUp = index > 0,
+            canMoveDown = index < categories.lastIndex,
+            onDismiss = { categoryMenuId = null },
+            onEdit = { editingCategoryId = cat.id; categoryMenuId = null },
+            onMove = { delta -> RadioRepository.moveCategory(cat.id, delta) },
+            onDelete = {
+                categoryMenuId = null
+                RadioRepository.deleteCategory(cat.id)
+                notify("Kategorie „${cat.title}“ gelöscht")
+            },
+        )
+    }
+
+    if (creatingCategory) {
+        CategoryDialog(
+            title = "Neue Kategorie",
+            initialTitle = "",
+            initialEmoji = Category.emojis.firstOrNull { e -> categories.none { it.emoji == e } } ?: "⭐",
+            confirmLabel = "Anlegen",
+            onConfirm = { title, emoji ->
+                val cat = RadioRepository.addCategory(title, emoji)
+                moveIntoNewCategory?.let { id ->
+                    RadioRepository.setStationCategory(id, cat.id)
+                    RadioRepository.find(id)?.let { notify("„${it.name}“ → ${cat.emoji} ${cat.title}") }
+                }
+                moveIntoNewCategory = null
+                creatingCategory = false
+            },
+            onDismiss = {
+                moveIntoNewCategory = null
+                creatingCategory = false
+            },
+        )
+    }
+
+    categories.firstOrNull { it.id == editingCategoryId }?.let { cat ->
+        CategoryDialog(
+            title = "Kategorie bearbeiten",
+            initialTitle = cat.title,
+            initialEmoji = cat.emoji,
+            confirmLabel = "Speichern",
+            onConfirm = { title, emoji ->
+                RadioRepository.updateCategory(cat.id, title, emoji)
+                editingCategoryId = null
+            },
+            onDismiss = { editingCategoryId = null },
+        )
     }
 
     if (adding) {
@@ -166,31 +298,28 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
             initialName = "",
             initialUrl = "",
             confirmLabel = "Hinzufügen",
-            initialCategory = Category.OTHER,
-            onConfirm = { name, url, category ->
-                RadioRepository.addCustom(name, url, category)
+            categories = categories,
+            initialCategoryId = Category.OTHER_ID,
+            onConfirm = { name, url, categoryId ->
+                RadioRepository.addCustom(name, url, categoryId)
                 // Kategorie aufklappen, damit man den neuen Sender sieht
-                if (category.id in RadioRepository.collapsed.value) RadioRepository.toggleCategory(category)
+                RadioRepository.expand(categoryId)
                 adding = false
             },
             onDismiss = { adding = false },
         )
     }
-    val editing = RadioRepository.find(editingId)
-    if (editing != null) {
+    RadioRepository.find(editingId)?.let { editing ->
         StationDialog(
             title = "Sender bearbeiten",
             initialName = editing.name,
             initialUrl = editing.urls.first(),
             confirmLabel = "Speichern",
-            initialCategory = editing.category,
-            onConfirm = { name, url, category ->
-                RadioRepository.updateCustom(editing.id, name, url, category)
-                if (category.id in RadioRepository.collapsed.value) RadioRepository.toggleCategory(category)
-                editingId = null
-            },
-            onDelete = {
-                RadioRepository.removeCustom(editing.id)
+            categories = categories,
+            initialCategoryId = editing.categoryId,
+            onConfirm = { name, url, categoryId ->
+                RadioRepository.updateCustom(editing.id, name, url, categoryId)
+                RadioRepository.expand(categoryId)
                 editingId = null
             },
             onDismiss = { editingId = null },
@@ -198,16 +327,21 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
     }
 }
 
-/** Zeilen der Senderliste: Kategorie-Kopf, Sender, Spotify-Karte, Hinzufügen. */
+/** Zeilen der Senderliste. */
 private sealed interface ListRow {
     val key: String
 
     data class Header(val category: Category, val count: Int, val expanded: Boolean) : ListRow {
-        override val key = "cat-" + category.id
+        override val key = "head-" + category.id
     }
 
     data class StationRow(val station: Station) : ListRow {
         override val key = station.id
+    }
+
+    /** Hinweis in einer leeren, aufgeklappten Kategorie */
+    data class Empty(val categoryId: String) : ListRow {
+        override val key = "empty-$categoryId"
     }
 
     data object Spotify : ListRow {
@@ -217,25 +351,32 @@ private sealed interface ListRow {
     data object Add : ListRow {
         override val key = "add"
     }
-}
 
-private fun buildRows(stations: List<Station>, collapsed: Set<String>): List<ListRow> = buildList {
-    Category.entries.forEach { cat ->
-        val members = stations.filter { it.category == cat }
-        val withSpotify = cat == Category.OTHER
-        val expanded = cat.id !in collapsed
-        add(ListRow.Header(cat, members.size + if (withSpotify) 1 else 0, expanded))
-        if (expanded) {
-            members.forEach { add(ListRow.StationRow(it)) }
-            if (withSpotify) add(ListRow.Spotify)
-        }
+    data class Restore(val count: Int) : ListRow {
+        override val key = "restore"
     }
-    add(ListRow.Add)
 }
 
-/** Kopf einer Kategorie – Antippen klappt sie auf oder zu. */
+private fun buildRows(stations: List<Station>, categories: List<Category>, collapsed: Set<String>, hiddenCount: Int): List<ListRow> =
+    buildList {
+        categories.forEach { cat ->
+            val members = stations.filter { it.categoryId == cat.id }
+            val withSpotify = cat.isFallback
+            val expanded = cat.id !in collapsed
+            add(ListRow.Header(cat, members.size + if (withSpotify) 1 else 0, expanded))
+            if (expanded) {
+                members.forEach { add(ListRow.StationRow(it)) }
+                if (withSpotify) add(ListRow.Spotify)
+                if (members.isEmpty() && !withSpotify) add(ListRow.Empty(cat.id))
+            }
+        }
+        add(ListRow.Add)
+        if (hiddenCount > 0) add(ListRow.Restore(hiddenCount))
+    }
+
+/** Kopf einer Kategorie – Antippen klappt sie auf oder zu, ⋮ öffnet das Kategorie-Menü. */
 @Composable
-private fun CategoryHeader(row: ListRow.Header, playing: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun CategoryHeader(row: ListRow.Header, playing: Boolean, onClick: () -> Unit, onMenu: () -> Unit, modifier: Modifier = Modifier) {
     val arrow by animateFloatAsState(if (row.expanded) 0f else -90f, label = "arrow")
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -244,8 +385,15 @@ private fun CategoryHeader(row: ListRow.Header, playing: Boolean, onClick: () ->
             .padding(top = 6.dp)
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
     ) {
+        Text(
+            "▾",
+            fontSize = 18.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.graphicsLayer { rotationZ = arrow },
+        )
+        Spacer(Modifier.width(8.dp))
         Text(row.category.emoji, fontSize = 18.sp)
         Spacer(Modifier.width(10.dp))
         Text(
@@ -253,6 +401,9 @@ private fun CategoryHeader(row: ListRow.Header, playing: Boolean, onClick: () ->
             fontSize = 18.sp,
             fontWeight = FontWeight.Medium,
             color = if (playing) Sand else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
         )
         Spacer(Modifier.width(8.dp))
         Box(
@@ -265,13 +416,48 @@ private fun CategoryHeader(row: ListRow.Header, playing: Boolean, onClick: () ->
         }
         if (playing && !row.expanded) Equalizer(active = true, modifier = Modifier.padding(start = 10.dp))
         Spacer(Modifier.weight(1f))
-        Text(
-            "▾",
-            fontSize = 20.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.graphicsLayer { rotationZ = arrow },
-        )
+        MenuButton(onMenu, "Kategorie-Optionen")
     }
+}
+
+/** Runder ⋮-Knopf für Menüs. */
+@Composable
+private fun MenuButton(onClick: () -> Unit, description: String) {
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("⋮", fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun EmptyCategoryHint(modifier: Modifier = Modifier) {
+    Text(
+        "Noch leer – über ⋮ bei einem Sender hierher verschieben oder einen Sender hinzufügen",
+        fontSize = 13.sp,
+        color = TextSoft.copy(alpha = 0.7f),
+        modifier = modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun RestoreRow(count: Int, onClick: () -> Unit) {
+    Text(
+        "Gelöschte Sender wiederherstellen ($count)",
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        textAlign = TextAlign.Center,
+    )
 }
 
 @Composable
@@ -291,7 +477,7 @@ private fun StationCard(
     station: Station,
     status: PlaybackStatus,
     onClick: () -> Unit,
-    onEdit: (() -> Unit)? = null,
+    onMenu: () -> Unit,
     modifier: Modifier = Modifier,
     /** 0 = normal, 1 = beim Verschieben angehoben */
     lifted: Float = 0f,
@@ -335,19 +521,7 @@ private fun StationCard(
             if (selected) {
                 Equalizer(active = status.phase == PlayerPhase.PLAYING, modifier = Modifier.padding(horizontal = 8.dp))
             }
-            if (onEdit != null) {
-                Box(
-                    Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .clickable(onClick = onEdit),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("✎", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                Spacer(Modifier.width(8.dp))
-            }
+            MenuButton(onMenu, "Optionen für ${station.name}")
         }
     }
 }
@@ -424,27 +598,26 @@ private fun SpotifyCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
+/** Am Listenende: neuen Sender oder neue Kategorie anlegen. */
 @Composable
-private fun AddCard(onClick: () -> Unit) {
+private fun AddButtons(onAddStation: () -> Unit, onAddCategory: () -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 6.dp)) {
+        OutlineAction("＋  Sender", onAddStation, Modifier.weight(1f))
+        OutlineAction("＋  Kategorie", onAddCategory, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun OutlineAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         color = Color.Transparent,
         shape = RoundedCornerShape(20.dp),
         border = BorderStroke(1.dp, Sand.copy(alpha = 0.35f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp)
+        modifier = modifier
             .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(vertical = 16.dp),
-        ) {
-            Text("＋", fontSize = 18.sp, color = Sand)
-            Spacer(Modifier.width(10.dp))
-            Text("Sender hinzufügen", fontSize = 16.sp, color = Sand)
-        }
+        Text(label, fontSize = 16.sp, color = Sand, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 16.dp))
     }
 }
 
@@ -454,16 +627,15 @@ private fun StationDialog(
     initialName: String,
     initialUrl: String,
     confirmLabel: String,
-    initialCategory: Category,
-    onConfirm: (name: String, url: String, category: Category) -> Unit,
+    categories: List<Category>,
+    initialCategoryId: String,
+    onConfirm: (name: String, url: String, categoryId: String) -> Unit,
     onDismiss: () -> Unit,
-    onDelete: (() -> Unit)? = null,
 ) {
     var name by rememberSaveable { mutableStateOf(initialName) }
     var url by rememberSaveable { mutableStateOf(initialUrl) }
-    var category by rememberSaveable { mutableStateOf(initialCategory) }
+    var categoryId by rememberSaveable { mutableStateOf(initialCategoryId) }
     var tried by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
     val nameOk = name.isNotBlank()
     val urlOk = isValidStreamUrl(url)
 
@@ -508,30 +680,13 @@ private fun StationDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text("Kategorie", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Category.entries.forEach { c ->
-                        FilterChip(
-                            selected = category == c,
-                            onClick = { category = c },
-                            label = { Text("${c.emoji} ${c.title}") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Sand.copy(alpha = 0.25f),
-                                selectedLabelColor = Sand,
-                            ),
-                        )
-                    }
-                }
-                if (onDelete != null) {
-                    TextButton(onClick = { if (confirmDelete) onDelete() else confirmDelete = true }) {
-                        Text(if (confirmDelete) "Wirklich löschen?" else "Sender löschen", color = Coral)
-                    }
-                }
+                CategoryChips(categories, selectedId = categoryId, onSelect = { categoryId = it.id })
             }
         },
         confirmButton = {
             TextButton(onClick = {
                 tried = true
-                if (nameOk && urlOk) onConfirm(name, url, category)
+                if (nameOk && urlOk) onConfirm(name, url, categoryId)
             }) { Text(confirmLabel, color = Sand) }
         },
         dismissButton = {
@@ -664,4 +819,208 @@ internal fun PlayButton(playing: Boolean, live: Boolean, onClick: () -> Unit) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------- Menüs und Dialoge
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CategoryChips(
+    categories: List<Category>,
+    selectedId: String?,
+    onSelect: (Category) -> Unit,
+    onNew: (() -> Unit)? = null,
+) {
+    val colors = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = Sand.copy(alpha = 0.25f),
+        selectedLabelColor = Sand,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        categories.forEach { c ->
+            FilterChip(
+                selected = c.id == selectedId,
+                onClick = { onSelect(c) },
+                label = { Text("${c.emoji} ${c.title}") },
+                colors = colors,
+            )
+        }
+        if (onNew != null) {
+            FilterChip(selected = false, onClick = onNew, label = { Text("＋ Neue Kategorie", color = Sand) }, colors = colors)
+        }
+    }
+}
+
+/** Menü eines Senders (⋮): Kategorie wechseln, bearbeiten, löschen. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StationMenuSheet(
+    station: Station,
+    categories: List<Category>,
+    onDismiss: () -> Unit,
+    onMoveTo: (Category) -> Unit,
+    onNewCategory: () -> Unit,
+    onEdit: (() -> Unit)?,
+    onDelete: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Card) {
+        Column(Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.06f)),
+                    contentAlignment = Alignment.Center,
+                ) { Text(station.emoji, fontSize = 22.sp) }
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text(station.name, fontSize = 19.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(station.subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Text("Kategorie", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            CategoryChips(categories, selectedId = station.categoryId, onSelect = { if (it.id != station.categoryId) onMoveTo(it) }, onNew = onNewCategory)
+            Spacer(Modifier.height(12.dp))
+            if (onEdit != null) SheetAction("✎", "Name oder Adresse bearbeiten", onClick = onEdit)
+            SheetAction("🗑", "Sender löschen", color = Coral, onClick = onDelete)
+            if (!station.custom) {
+                Text(
+                    "Eingebaute Sender lassen sich jederzeit wiederherstellen (am Ende der Liste).",
+                    fontSize = 12.sp,
+                    color = TextSoft.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Menü einer Kategorie (⋮): umbenennen, verschieben, löschen. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoryMenuSheet(
+    category: Category,
+    count: Int,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onMove: (Int) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Card) {
+        Column(Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(category.emoji, fontSize = 26.sp)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(category.title, fontSize = 19.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        if (count == 1) "1 Sender" else "$count Sender",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            SheetAction("✎", "Umbenennen / Symbol ändern", onClick = onEdit)
+            SheetAction("▲", "Nach oben", enabled = canMoveUp, onClick = { onMove(-1) })
+            SheetAction("▼", "Nach unten", enabled = canMoveDown, onClick = { onMove(1) })
+            if (category.isFallback) {
+                Text(
+                    "„${category.title}“ sammelt die Sender gelöschter Kategorien und kann deshalb nicht gelöscht werden.",
+                    fontSize = 12.sp,
+                    color = TextSoft.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+                )
+            } else {
+                SheetAction(
+                    "🗑",
+                    when {
+                        !confirmDelete -> "Kategorie löschen"
+                        count > 0 -> "Wirklich löschen? Die Sender kommen nach „Übrige“"
+                        else -> "Wirklich löschen?"
+                    },
+                    color = Coral,
+                    onClick = { if (confirmDelete) onDelete() else confirmDelete = true },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetAction(icon: String, label: String, color: Color = MaterialTheme.colorScheme.onSurface, enabled: Boolean = true, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 14.dp),
+    ) {
+        Text(icon, fontSize = 18.sp, color = color.copy(alpha = if (enabled) 1f else 0.3f), modifier = Modifier.width(32.dp))
+        Text(label, fontSize = 16.sp, color = color.copy(alpha = if (enabled) 1f else 0.3f))
+    }
+}
+
+/** Kategorie anlegen oder bearbeiten: Name und Symbol. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CategoryDialog(
+    title: String,
+    initialTitle: String,
+    initialEmoji: String,
+    confirmLabel: String,
+    onConfirm: (title: String, emoji: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf(initialTitle) }
+    var emoji by rememberSaveable { mutableStateOf(initialEmoji) }
+    var tried by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Card,
+        title = { Text(title, fontWeight = FontWeight.Light) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(24) },
+                    label = { Text("Name") },
+                    placeholder = { Text("z. B. Chillen, Sport, Auto") },
+                    singleLine = true,
+                    isError = tried && name.isBlank(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Sand, focusedLabelColor = Sand, cursorColor = Sand),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Symbol", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Category.emojis.forEach { e ->
+                        Box(
+                            Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(if (e == emoji) Sand.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.06f))
+                                .clickable { emoji = e },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(e, fontSize = 20.sp) }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                tried = true
+                if (name.isNotBlank()) onConfirm(name, emoji)
+            }) { Text(confirmLabel, color = Sand) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        },
+    )
 }

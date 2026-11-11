@@ -13,18 +13,31 @@ data class Station(
     val subtitle: String,
     val emoji: String,
     val custom: Boolean = false,
-    val category: Category = Category.OTHER,
+    /** id der Kategorie (siehe [Category]); unbekannte ids landen bei "Übrige" */
+    val categoryId: String = Category.OTHER_ID,
 )
 
-/** Ausklappbare Gruppen der Senderliste (in dieser Reihenfolge; auch die Tabs in Android Auto). */
-enum class Category(val id: String, val title: String, val emoji: String) {
-    ROCK("rock", "Rock", "🎸"),
-    WORK("work", "Work", "💼"),
-    OTHER("other", "Übrige", "📻"),
-    ;
+/**
+ * Ausklappbare Gruppe der Senderliste (in Android Auto: Tabs). Die Nutzer können Kategorien
+ * anlegen, umbenennen, umsortieren und löschen – nur "Übrige" bleibt als Sammelstelle immer da.
+ */
+data class Category(val id: String, val title: String, val emoji: String) {
+    /** "Übrige": nimmt die Sender gelöschter Kategorien auf und kann nicht gelöscht werden */
+    val isFallback: Boolean get() = id == OTHER_ID
 
     companion object {
-        fun fromId(id: String?): Category = entries.firstOrNull { it.id == id } ?: OTHER
+        const val ROCK_ID = "rock"
+        const val WORK_ID = "work"
+        const val OTHER_ID = "other"
+
+        val defaults = listOf(
+            Category(ROCK_ID, "Rock", "🎸"),
+            Category(WORK_ID, "Work", "💼"),
+            Category(OTHER_ID, "Übrige", "📻"),
+        )
+
+        /** Auswahl für das Symbol einer Kategorie */
+        val emojis = listOf("🎸", "💼", "📻", "🎷", "🎧", "🎹", "🎻", "🥁", "🌙", "☕", "🏃", "🚗", "🎉", "🌲", "🌊", "⭐", "❤️", "🔥")
     }
 }
 
@@ -33,7 +46,7 @@ object Presets {
     val all: List<Station> = listOf(
         Station(
             id = "kexp",
-            category = Category.ROCK,
+            categoryId = Category.ROCK_ID,
             name = "KEXP 90.3 FM",
             subtitle = "Seattle · Indie & Alternative",
             emoji = "🌲",
@@ -45,7 +58,7 @@ object Presets {
         ),
         Station(
             id = "bob-live",
-            category = Category.ROCK,
+            categoryId = Category.ROCK_ID,
             name = "Radio Bob Live",
             subtitle = "RADIO BOB! · Rock",
             emoji = "🤘",
@@ -57,7 +70,7 @@ object Presets {
         ),
         Station(
             id = "bob-grunge",
-            category = Category.ROCK,
+            categoryId = Category.ROCK_ID,
             name = "Radio Bob Grunge",
             subtitle = "RADIO BOB! · Grunge",
             emoji = "🎸",
@@ -69,7 +82,7 @@ object Presets {
         ),
         Station(
             id = "bayern1",
-            category = Category.OTHER,
+            categoryId = Category.OTHER_ID,
             name = "Bayern 1",
             subtitle = "Bayerischer Rundfunk · Oberbayern",
             emoji = "🏔️",
@@ -82,7 +95,7 @@ object Presets {
         ),
         Station(
             id = "virgin",
-            category = Category.ROCK,
+            categoryId = Category.ROCK_ID,
             name = "Virgin Radio",
             subtitle = "Virgin Radio Switzerland · Rock",
             emoji = "🎧",
@@ -94,7 +107,7 @@ object Presets {
         ),
         Station(
             id = "smooth-jazz",
-            category = Category.WORK,
+            categoryId = Category.WORK_ID,
             name = "Smooth Jazz Radio DE",
             subtitle = "Smooth Jazz · Lounge",
             emoji = "🎷",
@@ -106,7 +119,7 @@ object Presets {
         ),
         Station(
             id = "somafm-deepspaceone",
-            category = Category.WORK,
+            categoryId = Category.WORK_ID,
             name = "SomaFM – Deep Space One",
             subtitle = "SomaFM · Ambient & Space Music",
             emoji = "🌌",
@@ -119,7 +132,7 @@ object Presets {
         ),
         Station(
             id = "lofi-hiphop",
-            category = Category.WORK,
+            categoryId = Category.WORK_ID,
             name = "Lofi Hip Hop Radio",
             subtitle = "Lofi Hip Hop · Beats zum Arbeiten",
             emoji = "🎧",
