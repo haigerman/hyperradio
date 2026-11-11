@@ -6,6 +6,7 @@ Android-App für Webradio – auf dem Handy und in **Android Auto**.
 
 | Sender | Stream |
 |---|---|
+| 🌲 **KEXP 90.3 FM** | Seattle, `kexp.streamguys1.com/kexp160.aac` (AAC 160 kbit/s, Ausweich: MP3 128, AAC 64) |
 | 🤘 **Radio Bob Live** | `streams.radiobob.de/bob-live` (MP3 192 kbit/s, Ausweich: 128 kbit/s) |
 | 🎸 **Radio Bob Grunge** | `streams.radiobob.de/bob-grunge` (MP3 192 kbit/s, Ausweich: 128 kbit/s) |
 | 🏔️ **Bayern 1** | BR-Stream Oberbayern über `streams.br.de/bayern1obb_2.m3u` (Ausweich: `dispatcher.rndfnk.com`, MP3 high/mid) |

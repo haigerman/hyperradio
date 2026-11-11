@@ -19,6 +19,17 @@ data class Station(
 object Presets {
     val all: List<Station> = listOf(
         Station(
+            id = "kexp",
+            name = "KEXP 90.3 FM",
+            subtitle = "Seattle · Indie & Alternative",
+            emoji = "🌲",
+            urls = listOf(
+                "https://kexp.streamguys1.com/kexp160.aac",
+                "https://kexp-mp3-128.streamguys1.com/kexp128.mp3",
+                "https://kexp.streamguys1.com/kexp64.aac",
+            ),
+        ),
+        Station(
             id = "bob-live",
             name = "Radio Bob Live",
             subtitle = "RADIO BOB! · Rock",
