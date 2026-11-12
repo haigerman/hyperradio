@@ -11,15 +11,14 @@ Android-App für Webradio – auf dem Handy und in **Android Auto**.
 | 🎸 **Radio Bob Grunge** | `streams.radiobob.de/bob-grunge` (MP3 192 kbit/s, Ausweich: 128 kbit/s) |
 | 🏔️ **Bayern 1** | BR-Stream Oberbayern über `streams.br.de/bayern1obb_2.m3u` (Ausweich: `dispatcher.rndfnk.com`, MP3 high/mid) |
 | 🎧 **Virgin Radio** | Virgin Radio Switzerland, `stream.streambase.ch/vrock` (MP3 192 kbit/s, Ausweich: 128 kbit/s) |
-| 🎷 **Smooth Jazz Radio DE** | smooth-jazz-radio.de über laut.fm, `stream.laut.fm/pure-smooth-jazz` |
-| 🌌 **SomaFM – Deep Space One** | `ice1.somafm.com/deepspaceone-128-mp3` (MP3 128 kbit/s, Ausweich: ice2/ice4 und `somafm.com/deepspaceone.pls`) |
+| 🎷 **smoothjazz.com** | SmoothJazz.com, `smoothjazz.cdnstream1.com/2585_320.mp3` (MP3 320 kbit/s, Ausweich: 128 und 256 kbit/s) |
 | 🎧 **Lofi Hip Hop Radio** | Lofi-Hip-Hop über laut.fm, `stream.laut.fm/lofi` (Ausweich: `play.streamafrica.net/lofiradio`) |
 
 Jeder eingebaute Sender hat mehrere Adressen. Fällt eine aus, wechselt die App automatisch
 zur nächsten. Die Liste steht in `data/Station.kt` (`Presets`).
 
 **Kategorien:** Die Sender sind in ausklappbare Gruppen sortiert – anfangs 🎸 **Rock** (KEXP,
-Radio Bob Live, Radio Bob Grunge, Virgin Radio), 💼 **Work** (Smooth Jazz, SomaFM, Lofi Hip
+Radio Bob Live, Radio Bob Grunge, Virgin Radio), 💼 **Work** (smoothjazz.com, Lofi Hip
 Hop Radio) und 📻 **Übrige** (Bayern 1, Spotify-Mix). Antippen der Überschrift klappt eine
 Gruppe auf oder zu (wird gespeichert); läuft ein Sender in einer zugeklappten Gruppe, zeigt die
 Überschrift das an. In Android Auto erscheinen die Gruppen als Tabs (höchstens 4 – bei mehr

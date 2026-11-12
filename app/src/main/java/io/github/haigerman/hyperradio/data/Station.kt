@@ -108,26 +108,13 @@ object Presets {
         Station(
             id = "smooth-jazz",
             categoryId = Category.WORK_ID,
-            name = "Smooth Jazz Radio DE",
-            subtitle = "Smooth Jazz · Lounge",
+            name = "smoothjazz.com",
+            subtitle = "SmoothJazz.com · Smooth Jazz",
             emoji = "🎷",
             urls = listOf(
-                "https://stream.laut.fm/pure-smooth-jazz",
-                "https://pure-smooth-jazz.stream.laut.fm/pure-smooth-jazz",
-                "http://stream.laut.fm/pure-smooth-jazz",
-            ),
-        ),
-        Station(
-            id = "somafm-deepspaceone",
-            categoryId = Category.WORK_ID,
-            name = "SomaFM – Deep Space One",
-            subtitle = "SomaFM · Ambient & Space Music",
-            emoji = "🌌",
-            urls = listOf(
-                "https://ice1.somafm.com/deepspaceone-128-mp3",
-                "https://ice2.somafm.com/deepspaceone-128-mp3",
-                "https://ice4.somafm.com/deepspaceone-128-mp3",
-                "https://somafm.com/deepspaceone.pls",
+                "https://smoothjazz.cdnstream1.com/2585_320.mp3",
+                "https://smoothjazz.cdnstream1.com/2585_128.mp3",
+                "https://smoothjazz.cdnstream1.com/2585_256.mp3",
             ),
         ),
         Station(

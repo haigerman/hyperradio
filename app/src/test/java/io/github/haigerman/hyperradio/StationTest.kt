@@ -16,7 +16,7 @@ class StationTest {
 
     @Test
     fun presetsAreValid() {
-        assertEquals(8, Presets.all.size)
+        assertEquals(7, Presets.all.size)
         assertEquals(Presets.all.size, Presets.all.map { it.id }.toSet().size)
         Presets.all.forEach { s ->
             assertTrue(s.urls.isNotEmpty())
@@ -85,7 +85,7 @@ class StationOrderTest {
     fun categoriesAsRequested() {
         val byCat = Presets.all.groupBy({ it.categoryId }, { it.id })
         assertEquals(listOf("kexp", "bob-live", "bob-grunge", "virgin"), byCat[Category.ROCK_ID])
-        assertEquals(listOf("smooth-jazz", "somafm-deepspaceone", "lofi-hiphop"), byCat[Category.WORK_ID])
+        assertEquals(listOf("smooth-jazz", "lofi-hiphop"), byCat[Category.WORK_ID])
         assertEquals(listOf("bayern1"), byCat[Category.OTHER_ID])
     }
 
