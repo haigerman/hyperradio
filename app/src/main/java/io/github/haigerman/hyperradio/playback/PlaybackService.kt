@@ -15,6 +15,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Metadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -30,6 +31,7 @@ import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import androidx.media3.extractor.metadata.icy.IcyInfo
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -72,6 +74,8 @@ class PlaybackService : MediaLibraryService() {
     private var gaveUp = false
     private var hadReadyForItem = false
     private var currentId: String? = null
+    /** Aktueller Titel aus den Stream-Metadaten (ICY "StreamTitle"), z. B. "Interpret - Titel" */
+    private var icyTitle: String? = null
 
     /** Cover je Sender: ruhige Welle für die Liste, Live-Schnappschuss für "läuft gerade" */
     private val staticCovers = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
@@ -265,6 +269,7 @@ class PlaybackService : MediaLibraryService() {
             // nur das Cover wurde ausgetauscht → kein Senderwechsel
             if (mediaItem?.mediaId == currentId && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
             currentId = mediaItem?.mediaId
+            icyTitle = null
             cancelReconnect()
             failures = 0
             gaveUp = false
@@ -284,6 +289,17 @@ class PlaybackService : MediaLibraryService() {
         }
 
         private var lastTitle: String? = null
+
+        override fun onMetadata(metadata: Metadata) {
+            for (i in 0 until metadata.length()) {
+                val entry = metadata.get(i) as? IcyInfo ?: continue
+                val title = entry.title?.trim()?.takeIf { it.isNotEmpty() && it != "-" && it != " - " }
+                if (title != icyTitle) {
+                    icyTitle = title
+                    applyNowPlaying()
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------ Wiederverbinden
@@ -351,11 +367,32 @@ class PlaybackService : MediaLibraryService() {
             hadReadyForItem = false
             if (fresh.localConfiguration?.uri != item.localConfiguration?.uri) {
                 player.replaceMediaItem(index, fresh)
+                if (icyTitle != null) applyNowPlaying()
             }
             if (player.playbackState == Player.STATE_ENDED) player.seekToDefaultPosition(index)
             player.prepare()
             publishStatus()
         }, ContextCompatExecutor(main))
+    }
+
+    /**
+     * Schreibt den laufenden Titel in den aktuellen Eintrag: oben der Titel, darunter der Sender.
+     * Nötig, weil ExoPlayer die Angaben des Eintrags (Sendername) über die Stream-Metadaten legt –
+     * sonst sähe man weder in der App noch in der Benachrichtigung oder in Android Auto den Titel.
+     */
+    private fun applyNowPlaying() {
+        val index = player.currentMediaItemIndex
+        val item = player.currentMediaItem ?: return
+        val station = RadioRepository.find(item.mediaId) ?: return
+        val title = icyTitle
+        val updated = item.mediaMetadata.buildUpon()
+            .setTitle(title ?: station.name)
+            .setArtist(if (title != null) station.name else station.subtitle)
+            .build()
+        if (updated != item.mediaMetadata) {
+            player.replaceMediaItem(index, item.buildUpon().setMediaMetadata(updated).build())
+        }
+        publishStatus()
     }
 
     // ------------------------------------------------------------------ Status für die UI
@@ -374,8 +411,7 @@ class PlaybackService : MediaLibraryService() {
             player.playbackState == Player.STATE_BUFFERING && hadReadyForItem -> PlayerPhase.BUFFERING
             else -> PlayerPhase.CONNECTING
         }
-        val title = player.mediaMetadata.title?.toString()?.trim()
-        val nowPlaying = title?.takeIf { it.isNotEmpty() && it != station?.name && it != "-" }
+        val nowPlaying = icyTitle
         RadioRepository.publishStatus(
             PlaybackStatus(
                 stationId = station?.id ?: RadioRepository.lastStationId,
