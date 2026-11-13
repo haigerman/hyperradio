@@ -31,6 +31,11 @@ Kategorien bündelt der vierte Tab „Weitere“ den Rest).
 Kategorie), eigene Sender bearbeiten, Sender löschen – mit „Rückgängig“. Auch eingebaute Sender
 lassen sich löschen; „Gelöschte Sender wiederherstellen“ am Listenende holt sie zurück.
 
+**Auto Play (Schalter am Listenende):** Ist er an, setzt HyperRadio beim Verbinden mit
+Android Auto automatisch den zuletzt gehörten Sender fort (nur wenn gerade nichts läuft).
+Da sich Android Auto während einer Fahrt manchmal neu verbindet, greift Auto Play erst wieder,
+wenn Android Auto mindestens eine Minute getrennt war – also bei der nächsten Fahrt.
+
 **Kategorien verwalten:** „＋ Kategorie“ am Listenende legt eine neue an (Name + Symbol).
 Über ⋮ an der Überschrift: umbenennen/Symbol ändern, nach oben/unten schieben, löschen – die
 Sender wandern dann nach „Übrige“, das als Sammelstelle immer bleibt.

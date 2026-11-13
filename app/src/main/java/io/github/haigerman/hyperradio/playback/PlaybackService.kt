@@ -9,6 +9,7 @@ import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -523,7 +524,56 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    // ------------------------------------------------------------------ Auto Play
+
+    /** Verbundene Android-Auto-Oberflächen (Auto verbindet sich oft mehrfach gleichzeitig) */
+    private var autoConnections = 0
+    private var lastAutoDisconnect = 0L
+
+    private fun isCar(controller: MediaSession.ControllerInfo) = controller.packageName in CAR_PACKAGES
+
+    private fun onCarConnected() {
+        val now = SystemClock.elapsedRealtime()
+        // neue Fahrt = Auto war vorher mindestens eine Minute getrennt (nicht bei kurzem Neuverbinden)
+        val newDrive = autoConnections == 0 && (lastAutoDisconnect == 0L || now - lastAutoDisconnect > AUTO_REARM_MS)
+        autoConnections++
+        if (newDrive && RadioRepository.autoPlay.value) main.postDelayed(::autoPlayLastStation, AUTO_PLAY_DELAY_MS)
+    }
+
+    private fun onCarDisconnected() {
+        autoConnections = (autoConnections - 1).coerceAtLeast(0)
+        if (autoConnections == 0) lastAutoDisconnect = SystemClock.elapsedRealtime()
+    }
+
+    /** Zuletzt gehörten Sender fortsetzen – nur wenn gerade nichts läuft. */
+    private fun autoPlayLastStation() {
+        if (!RadioRepository.autoPlay.value || player.playWhenReady) return
+        val id = RadioRepository.lastStationId ?: return
+        val future = playlistStartingAt(id)
+        future.addListener({
+            val items = try {
+                future.get()
+            } catch (_: Exception) {
+                return@addListener
+            }
+            if (player.playWhenReady) return@addListener
+            player.setMediaItems(items.mediaItems, items.startIndex, items.startPositionMs)
+            player.prepare()
+            player.play()
+        }, ContextCompatExecutor(main))
+    }
+
     private inner class LibraryCallback : MediaLibrarySession.Callback {
+
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+            if (isCar(controller)) onCarConnected()
+            return super.onConnect(session, controller)
+        }
+
+        override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            if (isCar(controller)) onCarDisconnected()
+            super.onDisconnected(session, controller)
+        }
 
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
@@ -682,6 +732,11 @@ class PlaybackService : MediaLibraryService() {
         private const val CATEGORY_PREFIX = "cat-"
         private const val MORE_ID = "more"
         private const val MAX_TABS = 4
+
+        /** Android Auto (Handy) und Android Automotive (im Auto eingebaut) */
+        private val CAR_PACKAGES = setOf("com.google.android.projection.gearhead", "com.android.car.media", "com.google.android.carassistant")
+        private const val AUTO_PLAY_DELAY_MS = 1_500L
+        private const val AUTO_REARM_MS = 60_000L
         private const val RECENT_ID = "recent"
         private const val CONTENT_STYLE_PLAYABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
         private const val CONTENT_STYLE_LIST = 1

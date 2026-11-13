@@ -57,6 +57,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -190,6 +192,7 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
                             is ListRow.Empty -> EmptyCategoryHint(Modifier.animateItem())
                             ListRow.Spotify -> SpotifyCard(onClick = onSpotifyClick, modifier = Modifier.animateItem())
                             ListRow.Add -> AddButtons(onAddStation = { adding = true }, onAddCategory = { creatingCategory = true })
+                            ListRow.AutoPlay -> AutoPlayRow(lastStation = stations.firstOrNull { it.id == status.stationId })
                             is ListRow.Restore -> RestoreRow(row.count, onClick = {
                                 RadioRepository.restoreHiddenPresets()
                                 notify("Eingebaute Sender wiederhergestellt")
@@ -352,6 +355,10 @@ private sealed interface ListRow {
         override val key = "add"
     }
 
+    data object AutoPlay : ListRow {
+        override val key = "autoplay"
+    }
+
     data class Restore(val count: Int) : ListRow {
         override val key = "restore"
     }
@@ -371,6 +378,7 @@ private fun buildRows(stations: List<Station>, categories: List<Category>, colla
             }
         }
         add(ListRow.Add)
+        add(ListRow.AutoPlay)
         if (hiddenCount > 0) add(ListRow.Restore(hiddenCount))
     }
 
@@ -594,6 +602,51 @@ private fun SpotifyCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
             }
             if (playing) Equalizer(active = true, color = SpotifyGreen, modifier = Modifier.padding(start = 8.dp))
             Text("›", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+}
+
+/** Schalter "Auto Play": beim Verbinden mit Android Auto den zuletzt gehörten Sender fortsetzen. */
+@Composable
+private fun AutoPlayRow(lastStation: Station?) {
+    val enabled by RadioRepository.autoPlay.collectAsStateWithLifecycle()
+    Surface(
+        color = Card.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .clickable { RadioRepository.setAutoPlay(!enabled) },
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(if (enabled) Sand.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f)),
+                contentAlignment = Alignment.Center,
+            ) { Text("🚗", fontSize = 22.sp) }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Auto Play", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    if (enabled) "Mit Android Auto weiterhören" + (lastStation?.let { " · Zuletzt: ${it.name}" } ?: "")
+                    else "Beim Verbinden mit Android Auto den letzten Sender fortsetzen",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = enabled,
+                onCheckedChange = { RadioRepository.setAutoPlay(it) },
+                colors = SwitchDefaults.colors(checkedThumbColor = Night, checkedTrackColor = Sand),
+            )
         }
     }
 }

@@ -56,6 +56,10 @@ object RadioRepository {
     private val _hiddenCount = MutableStateFlow(0)
     val hiddenCount: StateFlow<Int> = _hiddenCount.asStateFlow()
 
+    /** Auto Play: beim Verbinden mit Android Auto den zuletzt gehörten Sender fortsetzen */
+    private val _autoPlay = MutableStateFlow(false)
+    val autoPlay: StateFlow<Boolean> = _autoPlay.asStateFlow()
+
     private val _status = MutableStateFlow(PlaybackStatus())
     val status: StateFlow<PlaybackStatus> = _status.asStateFlow()
 
@@ -81,6 +85,7 @@ object RadioRepository {
         overrides = decodeOverrides(p.getString(KEY_OVERRIDES, null))
         hidden = p.getStringSet(KEY_HIDDEN, emptySet())!!.toSet()
         _collapsed.value = p.getStringSet(KEY_COLLAPSED, emptySet())!!.toSet()
+        _autoPlay.value = p.getBoolean(KEY_AUTOPLAY, false)
         rebuild(decodeOrder(p.getString(KEY_ORDER, null)))
         _status.update { it.copy(stationId = lastStationId) }
     }
@@ -216,6 +221,11 @@ object RadioRepository {
         saveAll()
     }
 
+    fun setAutoPlay(enabled: Boolean) {
+        _autoPlay.value = enabled
+        prefs?.edit()?.putBoolean(KEY_AUTOPLAY, enabled)?.apply()
+    }
+
     fun publishStatus(status: PlaybackStatus) {
         _status.value = status
     }
@@ -252,6 +262,7 @@ object RadioRepository {
     private const val KEY_CATEGORIES = "categories"
     private const val KEY_OVERRIDES = "station_categories"
     private const val KEY_HIDDEN = "hidden_presets"
+    private const val KEY_AUTOPLAY = "auto_play"
     private const val KEY_KNOWN_CATEGORIES = "known_default_categories"
 
     /** Eingebaute Kategorien der ersten Version mit Kategorien */
