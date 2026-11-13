@@ -28,16 +28,18 @@ data class Category(val id: String, val title: String, val emoji: String) {
     companion object {
         const val ROCK_ID = "rock"
         const val WORK_ID = "work"
+        const val PARADISE_ID = "paradise"
         const val OTHER_ID = "other"
 
         val defaults = listOf(
             Category(ROCK_ID, "Rock", "🎸"),
             Category(WORK_ID, "Work", "💼"),
+            Category(PARADISE_ID, "Paradise", "🌴"),
             Category(OTHER_ID, "Übrige", "📻"),
         )
 
         /** Auswahl für das Symbol einer Kategorie */
-        val emojis = listOf("🎸", "💼", "📻", "🎷", "🎧", "🎹", "🎻", "🥁", "🌙", "☕", "🏃", "🚗", "🎉", "🌲", "🌊", "⭐", "❤️", "🔥")
+        val emojis = listOf("🎸", "💼", "🌴", "📻", "🎷", "🎧", "🎹", "🎻", "🥁", "🌙", "☕", "🏃", "🚗", "🎉", "🌲", "🌊", "⭐", "❤️", "🔥")
     }
 }
 
@@ -127,6 +129,40 @@ object Presets {
                 "https://stream.laut.fm/lofi",
                 "https://play.streamafrica.net/lofiradio",
                 "http://stream.laut.fm/lofi",
+            ),
+        ),
+        Station(
+            id = "rp-main",
+            categoryId = Category.PARADISE_ID,
+            name = "Radio Paradise – Main Mix",
+            subtitle = "Radio Paradise · Rock, Indie, Pop & mehr",
+            emoji = "🌴",
+            urls = listOf(
+                "https://stream.radioparadise.com/mp3-320",
+                "https://stream.radioparadise.com/aac-320",
+                "https://stream.radioparadise.com/flac",
+            ),
+        ),
+        Station(
+            id = "rp-mellow",
+            categoryId = Category.PARADISE_ID,
+            name = "Radio Paradise – Mellow Mix",
+            subtitle = "Radio Paradise · ruhig & entspannt",
+            emoji = "🌅",
+            urls = listOf(
+                "https://stream.radioparadise.com/mellow-320",
+                "https://stream.radioparadise.com/mellow-flac",
+            ),
+        ),
+        Station(
+            id = "rp-rock",
+            categoryId = Category.PARADISE_ID,
+            name = "Radio Paradise – Rock Mix",
+            subtitle = "Radio Paradise · Rock",
+            emoji = "🌋",
+            urls = listOf(
+                "https://stream.radioparadise.com/rock-320",
+                "https://stream.radioparadise.com/rock-flac",
             ),
         ),
     )

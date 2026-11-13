@@ -72,7 +72,11 @@ object RadioRepository {
         if (prefs != null) return
         val p = context.applicationContext.getSharedPreferences("radio", Context.MODE_PRIVATE)
         prefs = p
-        _categories.value = decodeCategories(p.getString(KEY_CATEGORIES, null))
+        val saved = decodeCategories(p.getString(KEY_CATEGORIES, null))
+        // Mit einem Update neu eingebaute Kategorien einmalig ergänzen (gelöschte nicht wieder anlegen)
+        val known = p.getStringSet(KEY_KNOWN_CATEGORIES, null)?.toSet()
+            ?: if (p.contains(KEY_CATEGORIES)) ORIGINAL_CATEGORY_IDS else emptySet()
+        _categories.value = addNewDefaults(saved, known)
         customs = decodeCustom(p.getString(KEY_CUSTOM, null))
         overrides = decodeOverrides(p.getString(KEY_OVERRIDES, null))
         hidden = p.getStringSet(KEY_HIDDEN, emptySet())!!.toSet()
@@ -237,6 +241,7 @@ object RadioRepository {
             ?.putString(KEY_CATEGORIES, encodeCategories(_categories.value))
             ?.putString(KEY_OVERRIDES, JSONObject(overrides as Map<*, *>).toString())
             ?.putStringSet(KEY_HIDDEN, hidden)
+            ?.putStringSet(KEY_KNOWN_CATEGORIES, Category.defaults.map { it.id }.toSet())
             ?.apply()
     }
 
@@ -247,6 +252,20 @@ object RadioRepository {
     private const val KEY_CATEGORIES = "categories"
     private const val KEY_OVERRIDES = "station_categories"
     private const val KEY_HIDDEN = "hidden_presets"
+    private const val KEY_KNOWN_CATEGORIES = "known_default_categories"
+
+    /** Eingebaute Kategorien der ersten Version mit Kategorien */
+    private val ORIGINAL_CATEGORY_IDS = setOf(Category.ROCK_ID, Category.WORK_ID, Category.OTHER_ID)
+
+    /** Eingebaute Kategorien, die der Nutzer noch nie gesehen hat, vor "Übrige" einfügen. */
+    internal fun addNewDefaults(saved: List<Category>, known: Set<String>): List<Category> {
+        val result = saved.toMutableList()
+        Category.defaults.filter { d -> d.id !in known && result.none { it.id == d.id } }.forEach { d ->
+            val i = result.indexOfFirst { it.isFallback }.let { if (it < 0) result.size else it }
+            result.add(i, d)
+        }
+        return result
+    }
     private const val CUSTOM_PREFIX = "custom-"
 
     internal fun customStation(id: String, name: String, url: String, categoryId: String = Category.OTHER_ID): Station {
