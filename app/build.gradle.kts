@@ -40,7 +40,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = if (keystoreFile != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            // Nur mit dem eigenen Release-Schlüssel signieren, nie still mit dem Debug-Key
+            if (keystoreFile != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -62,6 +63,22 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+// Release-Build ohne Keystore abbrechen: eine debug-signierte "Release"-APK löst
+// Play-Protect-Warnungen aus und lässt sich nicht über die Obtainium-Version updaten.
+val hasReleaseKeystore = keystoreFile != null
+tasks.configureEach {
+    if (name == "packageRelease" || name == "signReleaseBundle") {
+        doFirst {
+            if (!hasReleaseKeystore) {
+                throw GradleException(
+                    "Kein Release-Keystore: KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS und KEY_PASSWORD setzen " +
+                        "(siehe README, Abschnitt Release). Zum Testen assembleDebug verwenden."
+                )
+            }
+        }
     }
 }
 
