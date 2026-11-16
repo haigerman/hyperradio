@@ -16,7 +16,7 @@ class StationTest {
 
     @Test
     fun presetsAreValid() {
-        assertEquals(10, Presets.all.size)
+        assertEquals(12, Presets.all.size)
         assertEquals(Presets.all.size, Presets.all.map { it.id }.toSet().size)
         Presets.all.forEach { s ->
             assertTrue(s.urls.isNotEmpty())
@@ -88,6 +88,8 @@ class StationOrderTest {
         assertEquals(listOf("smooth-jazz", "lofi-hiphop"), byCat[Category.WORK_ID])
         assertEquals(listOf("bayern1"), byCat[Category.OTHER_ID])
         assertEquals(listOf("rp-main", "rp-mellow", "rp-rock"), byCat[Category.PARADISE_ID])
+        assertEquals(listOf("faz-fruehdenker", "tagesschau"), byCat[Category.PODCASTS_ID])
+        assertTrue(Presets.all.filter { it.categoryId == Category.PODCASTS_ID }.all { it.podcast })
     }
 
     @Test
@@ -140,10 +142,13 @@ class StationEditingTest {
         // neue Kategorie kommt vor "Übrige", Sender hinein, Kategorie löschen → Sender nach "Übrige"
         val sport = r.addCategory(" Sport ", "🏃")
         assertEquals("Sport", sport.title)
-        assertEquals(listOf(Category.ROCK_ID, Category.WORK_ID, Category.PARADISE_ID, sport.id, Category.OTHER_ID), r.categories.value.map { it.id })
+        assertEquals(
+            listOf(Category.ROCK_ID, Category.WORK_ID, Category.PARADISE_ID, Category.PODCASTS_ID, sport.id, Category.OTHER_ID),
+            r.categories.value.map { it.id },
+        )
         r.setStationCategory("kexp", sport.id)
         assertEquals(listOf("kexp"), ids(sport.id))
-        r.moveCategory(sport.id, -3)
+        r.moveCategory(sport.id, -4)
         assertEquals(sport.id, r.categories.value.first().id)
         assertEquals("kexp", r.stations.value.first().id) // Liste folgt der Kategorie-Reihenfolge
         r.deleteCategory(sport.id)
@@ -167,7 +172,7 @@ class StationEditingTest {
         val old = listOf(Category("rock", "Rock", "🎸"), Category("c-1", "Sport", "🏃"), Category("other", "Übrige", "📻"))
         // Update: "Paradise" war noch nie da → wird vor "Übrige" eingefügt
         val updated = RadioRepository.addNewDefaults(old, setOf("rock", "work", "other"))
-        assertEquals(listOf("rock", "c-1", Category.PARADISE_ID, "other"), updated.map { it.id })
+        assertEquals(listOf("rock", "c-1", Category.PARADISE_ID, Category.PODCASTS_ID, "other"), updated.map { it.id })
         // vom Nutzer gelöscht ("work", "paradise" bekannt) → kommt nicht zurück
         assertEquals(old, RadioRepository.addNewDefaults(old, Category.defaults.map { it.id }.toSet()))
     }

@@ -15,6 +15,8 @@ data class Station(
     val custom: Boolean = false,
     /** id der Kategorie (siehe [Category]); unbekannte ids landen bei "Übrige" */
     val categoryId: String = Category.OTHER_ID,
+    /** Podcast: [urls] ist der Feed, gespielt wird immer die neueste Folge (mit Pause/Weiter statt live) */
+    val podcast: Boolean = false,
 )
 
 /**
@@ -29,17 +31,19 @@ data class Category(val id: String, val title: String, val emoji: String) {
         const val ROCK_ID = "rock"
         const val WORK_ID = "work"
         const val PARADISE_ID = "paradise"
+        const val PODCASTS_ID = "podcasts"
         const val OTHER_ID = "other"
 
         val defaults = listOf(
             Category(ROCK_ID, "Rock", "🎸"),
             Category(WORK_ID, "Work", "💼"),
             Category(PARADISE_ID, "Paradise", "🌴"),
+            Category(PODCASTS_ID, "Podcasts", "🎙️"),
             Category(OTHER_ID, "Übrige", "📻"),
         )
 
         /** Auswahl für das Symbol einer Kategorie */
-        val emojis = listOf("🎸", "💼", "🌴", "📻", "🎷", "🎧", "🎹", "🎻", "🥁", "🌙", "☕", "🏃", "🚗", "🎉", "🌲", "🌊", "⭐", "❤️", "🔥")
+        val emojis = listOf("🎸", "💼", "🌴", "🎙️", "📻", "🎷", "🎧", "🎹", "🎻", "🥁", "🌙", "☕", "🏃", "🚗", "🎉", "🌲", "🌊", "⭐", "❤️", "🔥")
     }
 }
 
@@ -164,6 +168,24 @@ object Presets {
                 "https://stream.radioparadise.com/rock-320",
                 "https://stream.radioparadise.com/rock-flac",
             ),
+        ),
+        Station(
+            id = "faz-fruehdenker",
+            categoryId = Category.PODCASTS_ID,
+            podcast = true,
+            name = "F.A.Z. Frühdenker",
+            subtitle = "F.A.Z. · Die Nachrichten am Morgen",
+            emoji = "☕",
+            urls = listOf("https://fazfruehdenker.podigee.io/feed/mp3"),
+        ),
+        Station(
+            id = "tagesschau",
+            categoryId = Category.PODCASTS_ID,
+            podcast = true,
+            name = "tagesschau",
+            subtitle = "tagesschau · 20-Uhr-Nachrichten",
+            emoji = "📰",
+            urls = listOf("https://www.tagesschau.de/multimedia/sendung/tagesschau_20_uhr/podcast-ts2000-audio-100~podcast.xml"),
         ),
     )
 }

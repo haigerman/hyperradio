@@ -77,6 +77,9 @@ class PlaybackService : MediaLibraryService() {
     /** Aktueller Titel aus den Stream-Metadaten (ICY "StreamTitle"), z. B. "Interpret - Titel" */
     private var icyTitle: String? = null
 
+    /** Zuletzt aus dem Feed geholte Folge je Podcast (mit Zeitpunkt) */
+    private val episodes = java.util.concurrent.ConcurrentHashMap<String, Pair<PodcastFeed.Episode, Long>>()
+
     /** Cover je Sender: ruhige Welle für die Liste, Live-Schnappschuss für "läuft gerade" */
     private val staticCovers = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
     private val liveCovers = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
@@ -238,8 +241,9 @@ class PlaybackService : MediaLibraryService() {
                     hadReadyForItem = true
                 }
                 Player.STATE_ENDED -> {
-                    // Ein Live-Stream "endet" nur, wenn der Server die Verbindung schließt
-                    if (player.playWhenReady) scheduleReconnect()
+                    // Ein Live-Stream "endet" nur, wenn der Server die Verbindung schließt –
+                    // eine Podcast-Folge ist dagegen einfach zu Ende gehört
+                    if (player.playWhenReady && !isPodcast(player.currentMediaItem)) scheduleReconnect()
                 }
             }
             publishStatus()
@@ -275,6 +279,8 @@ class PlaybackService : MediaLibraryService() {
             gaveUp = false
             hadReadyForItem = false
             mediaItem?.mediaId?.let { RadioRepository.lastStationId = it }
+            // per Weiter/Zurück zu einem Podcast gewechselt → neueste Folge holen, falls veraltet
+            if (isPodcast(mediaItem) && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) refreshPodcastIfStale()
             publishStatus()
         }
 
@@ -356,6 +362,14 @@ class PlaybackService : MediaLibraryService() {
         val index = player.currentMediaItemIndex
         val item = player.currentMediaItem ?: return
         val station = RadioRepository.find(item.mediaId) ?: return
+        // Podcast mit schon aufgelöster Folge: einfach an derselben Stelle weiter
+        if (station.podcast && item.localConfiguration?.uri?.toString() !in station.urls) {
+            hadReadyForItem = false
+            if (player.playbackState == Player.STATE_ENDED) player.seekToDefaultPosition(index)
+            player.prepare()
+            publishStatus()
+            return
+        }
         val future = io.submit<MediaItem> { mediaItemFor(station, resolve = true) }
         future.addListener({
             val fresh = try {
@@ -395,14 +409,41 @@ class PlaybackService : MediaLibraryService() {
         publishStatus()
     }
 
+    // ------------------------------------------------------------------ Podcasts
+
+    private fun isPodcast(item: MediaItem?): Boolean = RadioRepository.find(item?.mediaId)?.podcast == true
+
+    /** Holt die neueste Folge, wenn die gemerkte älter als [EPISODE_MAX_AGE_MS] ist. */
+    private fun refreshPodcastIfStale() {
+        val item = player.currentMediaItem ?: return
+        val station = RadioRepository.find(item.mediaId)?.takeIf { it.podcast } ?: return
+        val cached = episodes[station.id]
+        if (cached != null && System.currentTimeMillis() - cached.second < EPISODE_MAX_AGE_MS) return
+        val future = io.submit<MediaItem> { mediaItemFor(station, resolve = true) }
+        future.addListener({
+            val fresh = try {
+                future.get()
+            } catch (_: Exception) {
+                return@addListener
+            }
+            if (player.currentMediaItem?.mediaId != station.id) return@addListener
+            if (fresh.localConfiguration?.uri != player.currentMediaItem?.localConfiguration?.uri) {
+                player.replaceMediaItem(player.currentMediaItemIndex, fresh)
+                player.prepare()
+            }
+        }, ContextCompatExecutor(main))
+    }
+
     // ------------------------------------------------------------------ Status für die UI
 
     private fun publishStatus() {
         val item = player.currentMediaItem
         val station = RadioRepository.find(item?.mediaId)
+        val podcast = station?.podcast == true
         val phase = when {
             item == null -> PlayerPhase.IDLE
             gaveUp -> PlayerPhase.ERROR
+            podcast && player.playbackState == Player.STATE_ENDED -> PlayerPhase.ENDED
             !player.playWhenReady -> PlayerPhase.PAUSED
             waitingForNetwork -> PlayerPhase.WAITING_FOR_NETWORK
             reconnectTask != null || player.playerError != null || player.playbackState == Player.STATE_ENDED ->
@@ -411,13 +452,17 @@ class PlaybackService : MediaLibraryService() {
             player.playbackState == Player.STATE_BUFFERING && hadReadyForItem -> PlayerPhase.BUFFERING
             else -> PlayerPhase.CONNECTING
         }
-        val nowPlaying = icyTitle
+        // Radio: Titel aus dem Stream; Podcast: Titel der Folge
+        val nowPlaying = icyTitle ?: if (podcast) item?.mediaMetadata?.title?.toString()?.takeIf { it != station?.name } else null
         RadioRepository.publishStatus(
             PlaybackStatus(
                 stationId = station?.id ?: RadioRepository.lastStationId,
                 phase = phase,
                 nowPlaying = if (phase == PlayerPhase.IDLE) null else nowPlaying,
                 bufferedMs = if (phase == PlayerPhase.PLAYING || phase == PlayerPhase.BUFFERING) player.totalBufferedDuration else 0,
+                positionMs = if (podcast) player.currentPosition.coerceAtLeast(0) else 0,
+                durationMs = if (podcast) player.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0) ?: 0 else 0,
+                podcast = podcast,
             ),
         )
     }
@@ -425,6 +470,7 @@ class PlaybackService : MediaLibraryService() {
     // ------------------------------------------------------------------ Senderliste (App & Android Auto)
 
     private fun mediaItemFor(station: Station, resolve: Boolean): MediaItem {
+        if (station.podcast) return podcastItemFor(station, resolve)
         val i = (urlIndex[station.id] ?: 0).coerceIn(0, station.urls.lastIndex)
         val raw = station.urls[i]
         val uri = if (resolve) StreamResolver.resolve(raw, userAgent) else raw
@@ -433,6 +479,24 @@ class PlaybackService : MediaLibraryService() {
             .setUri(uri)
             .apply { if (StreamResolver.isHls(uri)) setMimeType(MimeTypes.APPLICATION_M3U8) }
             .setMediaMetadata(browseMetadata(station, liveCovers[station.id]))
+            .build()
+    }
+
+    /** Podcast: neueste Folge aus dem Feed (oder die zuletzt gefundene, wenn der Feed gerade nicht erreichbar ist). */
+    private fun podcastItemFor(station: Station, resolve: Boolean): MediaItem {
+        val feed = station.urls.first()
+        val episode = (if (resolve) PodcastFeed.latest(feed, userAgent) else null)
+            ?.also { episodes[station.id] = it to System.currentTimeMillis() }
+            ?: episodes[station.id]?.first
+        val metadata = browseMetadata(station, liveCovers[station.id]).buildUpon()
+            .setTitle(episode?.title ?: station.name)
+            .setArtist(if (episode?.title != null) station.name else station.subtitle)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+            .build()
+        return MediaItem.Builder()
+            .setMediaId(station.id)
+            .setUri(episode?.url ?: feed)
+            .setMediaMetadata(metadata)
             .build()
     }
 
@@ -555,7 +619,9 @@ class PlaybackService : MediaLibraryService() {
         val stations = RadioRepository.stations.value
         val start = stations.indexOfFirst { it.id == stationId }.coerceAtLeast(0)
         return io.submit<MediaSession.MediaItemsWithStartPosition> {
-            val items = stations.map { mediaItemFor(it, resolve = true) }
+            // Podcast-Feeds nur für den gestarteten Eintrag laden (sonst verzögert jeder Senderstart);
+            // bei Weiter/Zurück zu einem Podcast holt refreshPodcastIfStale die neueste Folge
+            val items = stations.map { mediaItemFor(it, resolve = !it.podcast || it.id == stations[start].id) }
             MediaSession.MediaItemsWithStartPosition(items, start, C.TIME_UNSET)
         }
     }
@@ -773,6 +839,7 @@ class PlaybackService : MediaLibraryService() {
         private val CAR_PACKAGES = setOf("com.google.android.projection.gearhead", "com.android.car.media", "com.google.android.carassistant")
         private const val AUTO_PLAY_DELAY_MS = 1_500L
         private const val AUTO_REARM_MS = 60_000L
+        private const val EPISODE_MAX_AGE_MS = 30 * 60_000L
         private const val RECENT_ID = "recent"
         private const val CONTENT_STYLE_PLAYABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
         private const val CONTENT_STYLE_LIST = 1

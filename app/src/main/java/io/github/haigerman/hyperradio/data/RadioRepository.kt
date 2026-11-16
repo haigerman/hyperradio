@@ -25,6 +25,8 @@ enum class PlayerPhase {
     WAITING_FOR_NETWORK,
     /** Alle Versuche gescheitert */
     ERROR,
+    /** Podcast-Folge zu Ende gehört */
+    ENDED,
 }
 
 data class PlaybackStatus(
@@ -34,6 +36,10 @@ data class PlaybackStatus(
     val nowPlaying: String? = null,
     /** Wie viel Audio schon im Voraus geladen ist */
     val bufferedMs: Long = 0,
+    /** Podcast: Position und Länge der Folge (sonst 0) */
+    val positionMs: Long = 0,
+    val durationMs: Long = 0,
+    val podcast: Boolean = false,
 )
 
 /** Ein gelöschter Sender – für "Rückgängig". */

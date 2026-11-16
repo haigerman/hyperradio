@@ -16,13 +16,15 @@ Android-App für Webradio – auf dem Handy und in **Android Auto**.
 | 🌴 **Radio Paradise – Main Mix** | `stream.radioparadise.com/mp3-320` (MP3 320, Ausweich: AAC 320, FLAC) |
 | 🌅 **Radio Paradise – Mellow Mix** | `stream.radioparadise.com/mellow-320` (AAC 320, Ausweich: FLAC) |
 | 🌋 **Radio Paradise – Rock Mix** | `stream.radioparadise.com/rock-320` (AAC 320, Ausweich: FLAC) |
+| ☕ **F.A.Z. Frühdenker** (Podcast) | neueste Folge aus `fazfruehdenker.podigee.io/feed/mp3` |
+| 📰 **tagesschau** (Podcast) | neueste 20-Uhr-tagesschau aus dem Audio-Feed von tagesschau.de |
 
 Jeder eingebaute Sender hat mehrere Adressen. Fällt eine aus, wechselt die App automatisch
 zur nächsten. Die Liste steht in `data/Station.kt` (`Presets`).
 
 **Kategorien:** Die Sender sind in ausklappbare Gruppen sortiert – anfangs 🎸 **Rock** (KEXP,
 Radio Bob Live, Radio Bob Grunge, Virgin Radio), 💼 **Work** (smoothjazz.com, Lofi Hip
-Hop Radio), 🌴 **Paradise** (Radio Paradise Main, Mellow, Rock) und 📻 **Übrige** (Bayern 1, Spotify-Mix). Antippen der Überschrift klappt eine
+Hop Radio), 🌴 **Paradise** (Radio Paradise Main, Mellow, Rock), 🎙️ **Podcasts** (F.A.Z. Frühdenker, tagesschau) und 📻 **Übrige** (Bayern 1, Spotify-Mix). Antippen der Überschrift klappt eine
 Gruppe auf oder zu (wird gespeichert); läuft ein Sender in einer zugeklappten Gruppe, zeigt die
 Überschrift das an. In Android Auto erscheinen die Gruppen als Tabs (höchstens 4 – bei mehr
 Kategorien bündelt der vierte Tab „Weitere“ den Rest).
@@ -30,6 +32,11 @@ Kategorien bündelt der vierte Tab „Weitere“ den Rest).
 **Sender verwalten (⋮ an jeder Senderkarte):** Kategorie wechseln (auch direkt in eine neue
 Kategorie), eigene Sender bearbeiten, Sender löschen – mit „Rückgängig“. Auch eingebaute Sender
 lassen sich löschen; „Gelöschte Sender wiederherstellen“ am Listenende holt sie zurück.
+
+**Podcasts:** Für Podcasts ist der Feed hinterlegt; beim Antippen holt HyperRadio die neueste
+Folge. Anders als beim Radio geht es nach einer Pause an derselben Stelle weiter, am Ende der Folge
+hört die Wiedergabe auf („Folge zu Ende – tippe für die neueste Folge“), und unten stehen Position
+und Länge.
 
 **Auto Play (Schalter am Listenende):** Ist er an, setzt HyperRadio beim Verbinden mit
 Android Auto automatisch den zuletzt gehörten Sender fort (nur wenn gerade nichts läuft).

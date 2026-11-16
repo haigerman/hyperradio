@@ -159,7 +159,9 @@ class MainActivity : ComponentActivity() {
     private fun playStation(id: String) {
         askNotificationPermission()
         withController { c ->
-            if (c.currentMediaItem?.mediaId == id && RadioRepository.status.value.phase != PlayerPhase.ERROR) {
+            val phase = RadioRepository.status.value.phase
+            // Fehler oder zu Ende gehörte Podcast-Folge → neu laden (Podcast: neueste Folge)
+            if (c.currentMediaItem?.mediaId == id && phase != PlayerPhase.ERROR && phase != PlayerPhase.ENDED) {
                 // derselbe Sender: an/aus
                 if (c.playWhenReady) c.pause() else resume(c)
             } else {
@@ -177,6 +179,8 @@ class MainActivity : ComponentActivity() {
             when {
                 c.currentMediaItem == null -> (status.stationId ?: RadioRepository.stations.value.firstOrNull()?.id)?.let(::playStation)
                 status.phase == PlayerPhase.ERROR -> resume(c)
+                // Podcast-Folge zu Ende → neueste Folge laden
+                status.phase == PlayerPhase.ENDED -> c.currentMediaItem?.mediaId?.let(::playStation)
                 c.playWhenReady -> c.pause()
                 else -> {
                     askNotificationPermission()

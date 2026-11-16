@@ -774,7 +774,8 @@ private fun BottomPanel(stations: List<Station>, status: PlaybackStatus, onPlayP
             modifier = Modifier.padding(top = 2.dp),
         )
         Spacer(Modifier.height(10.dp))
-        val active = status.phase != PlayerPhase.IDLE && status.phase != PlayerPhase.PAUSED && status.phase != PlayerPhase.ERROR
+        val active = status.phase != PlayerPhase.IDLE && status.phase != PlayerPhase.PAUSED &&
+            status.phase != PlayerPhase.ERROR && status.phase != PlayerPhase.ENDED
         PlayButton(playing = active, live = status.phase == PlayerPhase.PLAYING, onClick = onPlayPause)
         Spacer(Modifier.height(8.dp))
         BufferBar(status)
@@ -785,6 +786,16 @@ private fun BottomPanel(stations: List<Station>, status: PlaybackStatus, onPlayP
 
 private fun statusText(status: PlaybackStatus, station: Station?): String {
     val secs = status.bufferedMs / 1000
+    if (status.podcast) {
+        val time = if (status.durationMs > 0) "${clock(status.positionMs)} / ${clock(status.durationMs)}" else clock(status.positionMs)
+        when (status.phase) {
+            PlayerPhase.CONNECTING -> return "Lade die neueste Folge …"
+            PlayerPhase.PLAYING -> return "Folge · $time"
+            PlayerPhase.PAUSED -> return "Pausiert · $time"
+            PlayerPhase.BUFFERING -> return "Lädt … · $time"
+            else -> Unit
+        }
+    }
     return when (status.phase) {
         PlayerPhase.IDLE -> if (station != null) "Tippe zum Starten" else "Tippe auf einen Sender"
         PlayerPhase.CONNECTING -> "Verbinde und fülle Puffer …"
@@ -794,7 +805,14 @@ private fun statusText(status: PlaybackStatus, station: Station?): String {
         PlayerPhase.RECONNECTING -> "Verbindung unterbrochen – verbinde neu …"
         PlayerPhase.WAITING_FOR_NETWORK -> "Kein Netz – geht automatisch weiter"
         PlayerPhase.ERROR -> "Sender nicht erreichbar – tippe für neuen Versuch"
+        PlayerPhase.ENDED -> "Folge zu Ende – tippe für die neueste Folge"
     }
+}
+
+/** 754000 ms → "12:34", über eine Stunde "1:02:03" */
+private fun clock(ms: Long): String {
+    val t = ms / 1000
+    return if (t >= 3600) "%d:%02d:%02d".format(t / 3600, t / 60 % 60, t % 60) else "%d:%02d".format(t / 60, t % 60)
 }
 
 private fun statusColor(phase: PlayerPhase): Color = when (phase) {
@@ -805,7 +823,12 @@ private fun statusColor(phase: PlayerPhase): Color = when (phase) {
 /** Zeigt, wie viel Audio im Voraus geladen ist (voll = 30 s). */
 @Composable
 private fun BufferBar(status: PlaybackStatus) {
-    val target = (status.bufferedMs / 30_000f).coerceIn(0f, 1f)
+    // Podcast: Fortschritt der Folge; Radio: wie viel im Voraus geladen ist
+    val target = if (status.podcast) {
+        if (status.durationMs > 0) (status.positionMs.toFloat() / status.durationMs).coerceIn(0f, 1f) else 0f
+    } else {
+        (status.bufferedMs / 30_000f).coerceIn(0f, 1f)
+    }
     val fill by animateFloatAsState(target, tween(800), label = "buffer")
     Canvas(
         Modifier
