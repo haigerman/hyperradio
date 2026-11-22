@@ -39,9 +39,10 @@ hört die Wiedergabe auf („Folge zu Ende – tippe für die neueste Folge“),
 und Länge.
 
 **Auto Play (Schalter am Listenende):** Ist er an, setzt HyperRadio beim Verbinden mit
-Android Auto automatisch den zuletzt gehörten Sender fort (nur wenn gerade nichts läuft).
-Da sich Android Auto während einer Fahrt manchmal neu verbindet, greift Auto Play erst wieder,
-wenn Android Auto mindestens eine Minute getrennt war – also bei der nächsten Fahrt.
+Android Auto automatisch den zuletzt gehörten Sender fort (nur wenn gerade nichts läuft). Ob das
+Auto verbunden ist, erkennt die App über Androids offizielle Abfrage (CarConnection). Nach jeder
+Unterbrechung von mindestens 30 Sekunden (z. B. kurz einkaufen) startet der Sender beim
+Wiedereinsteigen erneut; kürzere Verbindungsaussetzer lösen keinen Neustart aus.
 
 **Kategorien verwalten:** „＋ Kategorie“ am Listenende legt eine neue an (Name + Symbol).
 Über ⋮ an der Überschrift: umbenennen/Symbol ändern, nach oben/unten schieben, löschen – die

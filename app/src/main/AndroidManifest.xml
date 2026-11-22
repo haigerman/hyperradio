@@ -11,6 +11,8 @@
     <!-- Spotify-App finden und starten (Paket-Sichtbarkeit ab Android 11) -->
     <queries>
         <package android:name="com.spotify.music" />
+        <!-- Android Auto: Verbindungsstatus abfragen (Auto Play) -->
+        <package android:name="com.google.android.projection.gearhead" />
     </queries>
 
     <application

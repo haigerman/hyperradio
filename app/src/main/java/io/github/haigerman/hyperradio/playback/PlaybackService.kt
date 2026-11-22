@@ -13,6 +13,8 @@ import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.car.app.connection.CarConnection
+import androidx.lifecycle.Observer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Metadata
@@ -144,6 +146,10 @@ class PlaybackService : MediaLibraryService() {
             connectivity?.registerDefaultNetworkCallback(networkCallback)
         } catch (_: Exception) {
         }
+        try {
+            carConnection = CarConnection(this).also { it.type.observeForever(carObserver) }
+        } catch (_: Exception) {
+        }
         main.post(statusTicker)
         main.postDelayed(coverTicker, COVER_REFRESH_MS)
     }
@@ -154,6 +160,10 @@ class PlaybackService : MediaLibraryService() {
         main.removeCallbacksAndMessages(null)
         try {
             connectivity?.unregisterNetworkCallback(networkCallback)
+        } catch (_: Exception) {
+        }
+        try {
+            carConnection?.type?.removeObserver(carObserver)
         } catch (_: Exception) {
         }
         session?.run {
@@ -628,24 +638,46 @@ class PlaybackService : MediaLibraryService() {
 
     // ------------------------------------------------------------------ Auto Play
 
-    /** Verbundene Android-Auto-Oberflächen (Auto verbindet sich oft mehrfach gleichzeitig) */
+    /** Neue Fahrt = Auto war vorher mindestens 30 s getrennt */
+    private val drive = DriveDetector(AUTO_REARM_MS)
+
+    /**
+     * Verbindungsstatus von Android Auto über Androids offizielle Abfrage (CarConnection).
+     * Zuverlässiger als die Verbindungen zum Mediendienst: Android Auto bleibt nach dem Aussteigen
+     * oft noch im Hintergrund mit dem Dienst verbunden – dann sah ein kurzer Stopp (Einkaufen)
+     * nicht wie eine neue Fahrt aus.
+     */
+    private var carConnection: CarConnection? = null
+    private var carStateKnown = false
+    private val carObserver = Observer<Int> { type ->
+        carStateKnown = true
+        val now = SystemClock.elapsedRealtime()
+        if (type == CarConnection.CONNECTION_TYPE_NOT_CONNECTED) drive.onDisconnected(now)
+        else if (drive.onConnected(now)) startAutoPlay()
+    }
+
+    /** Ersatzweg, falls CarConnection nichts meldet: Verbindungen der Android-Auto-Oberfläche zählen */
     private var autoConnections = 0
-    private var lastAutoDisconnect = 0L
 
     private fun isCar(controller: MediaSession.ControllerInfo) = controller.packageName in CAR_PACKAGES
 
     private fun onCarConnected() {
-        val now = SystemClock.elapsedRealtime()
-        // neue Fahrt = Auto war vorher mindestens eine Minute getrennt (nicht bei kurzem Neuverbinden)
-        val newDrive = autoConnections == 0 && (lastAutoDisconnect == 0L || now - lastAutoDisconnect > AUTO_REARM_MS)
         autoConnections++
-        if (newDrive && RadioRepository.autoPlay.value) main.postDelayed(::autoPlayLastStation, AUTO_PLAY_DELAY_MS)
+        if (!carStateKnown && autoConnections == 1 && drive.onConnected(SystemClock.elapsedRealtime())) startAutoPlay()
     }
 
     private fun onCarDisconnected() {
         autoConnections = (autoConnections - 1).coerceAtLeast(0)
-        if (autoConnections == 0) lastAutoDisconnect = SystemClock.elapsedRealtime()
+        if (!carStateKnown && autoConnections == 0) drive.onDisconnected(SystemClock.elapsedRealtime())
     }
+
+    private fun startAutoPlay() {
+        if (!RadioRepository.autoPlay.value) return
+        main.removeCallbacks(autoPlayTask)
+        main.postDelayed(autoPlayTask, AUTO_PLAY_DELAY_MS)
+    }
+
+    private val autoPlayTask = Runnable { autoPlayLastStation() }
 
     /** Zuletzt gehörten Sender fortsetzen – nur wenn gerade nichts läuft. */
     private fun autoPlayLastStation() {
@@ -838,7 +870,7 @@ class PlaybackService : MediaLibraryService() {
         /** Android Auto (Handy) und Android Automotive (im Auto eingebaut) */
         private val CAR_PACKAGES = setOf("com.google.android.projection.gearhead", "com.android.car.media", "com.google.android.carassistant")
         private const val AUTO_PLAY_DELAY_MS = 1_500L
-        private const val AUTO_REARM_MS = 60_000L
+        private const val AUTO_REARM_MS = 30_000L
         private const val EPISODE_MAX_AGE_MS = 30 * 60_000L
         private const val RECENT_ID = "recent"
         private const val CONTENT_STYLE_PLAYABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
