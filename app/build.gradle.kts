@@ -93,8 +93,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
-    // Spotify-Anmeldung im In-App-Browser
-    implementation("androidx.browser:browser:1.8.0")
     // Erkennt zuverlässig, ob Android Auto verbunden ist (für Auto Play)
     implementation("androidx.car.app:app:1.4.0")
 

@@ -50,8 +50,6 @@ import io.github.haigerman.hyperradio.data.PlaybackStatus
 import io.github.haigerman.hyperradio.data.PlayerPhase
 import io.github.haigerman.hyperradio.data.RadioRepository
 import io.github.haigerman.hyperradio.data.Station
-import io.github.haigerman.hyperradio.spotify.SpotifyConfig
-import io.github.haigerman.hyperradio.spotify.SpotifyRepository
 import java.util.concurrent.Executors
 
 /**
@@ -124,7 +122,6 @@ class PlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
         RadioRepository.init(this)
-        SpotifyRepository.init(this)
         player = buildPlayer()
         player.addListener(playerListener)
 
@@ -571,50 +568,6 @@ class PlaybackService : MediaLibraryService() {
         )
         .build()
 
-    // ------------------------------------------------------------------ Spotify-Mix im Auto
-
-    private fun spotifyItem(): MediaItem {
-        val sp = SpotifyRepository.state.value
-        val subtitle = when {
-            !sp.loggedIn -> "Am Handy bei Spotify anmelden"
-            sp.selected.isEmpty() -> "Am Handy Künstler auswählen"
-            else -> "${sp.selected.size} Künstler · Zufallswiedergabe über Spotify"
-        }
-        val pseudo = Station(id = SPOTIFY_ID, name = "Spotify-Mix", urls = emptyList(), subtitle = subtitle, emoji = "🔀")
-        val cover = staticCovers.getOrPut(SPOTIFY_ID) { CoverArt.render(pseudo, null, size = 320) }
-        return MediaItem.Builder()
-            .setMediaId(SPOTIFY_ID)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setArtworkData(cover, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                    .setTitle(pseudo.name)
-                    .setArtist(subtitle)
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_PLAYLIST)
-                    .setIsBrowsable(false)
-                    .setIsPlayable(true)
-                    .build(),
-            )
-            .build()
-    }
-
-    private fun isSpotifyQuery(query: String?): Boolean {
-        val q = query?.lowercase() ?: return false
-        return SpotifyConfig.isConfigured && (q.contains("spotify") || q.contains("mix"))
-    }
-
-    /**
-     * Spotify kann nicht in HyperRadio selbst spielen (Kopierschutz) – das Radio hält an und die
-     * Spotify-App übernimmt; Android Auto wechselt dann zu deren Anzeige. Fehler erscheinen als
-     * Hinweis auf dem Auto-Display.
-     */
-    private fun <T> startSpotifyMix(mediaSession: MediaSession): ListenableFuture<T> {
-        player.pause()
-        SpotifyRepository.startMix(this) { error ->
-            if (error != null) mediaSession.sendError(SessionError(SessionError.ERROR_UNKNOWN, error))
-        }
-        return Futures.immediateFailedFuture(UnsupportedOperationException("Spotify-Mix läuft in der Spotify-App"))
-    }
-
     private fun findByQuery(query: String): List<Station> {
         val q = query.trim().lowercase()
         val all = RadioRepository.stations.value
@@ -738,8 +691,7 @@ class PlaybackService : MediaLibraryService() {
                     if (categories.size <= MAX_TABS) categories.map { folder(CATEGORY_PREFIX + it.id, it.title) }
                     else categories.take(MAX_TABS - 1).map { folder(CATEGORY_PREFIX + it.id, it.title) } + folder(MORE_ID, "Weitere")
                 parentId == MORE_ID -> categories.drop(MAX_TABS - 1).map { folder(CATEGORY_PREFIX + it.id, "${it.emoji} ${it.title}") }
-                category != null -> RadioRepository.stations.value.filter { it.categoryId == category.id }.map(::browseItem) +
-                    listOfNotNull(if (category.isFallback && SpotifyConfig.isConfigured) spotifyItem() else null)
+                category != null -> RadioRepository.stations.value.filter { it.categoryId == category.id }.map(::browseItem)
                 parentId == RECENT_ID -> listOfNotNull(RadioRepository.find(RadioRepository.lastStationId) ?: RadioRepository.stations.value.firstOrNull())
                     .map(::browseItem)
                 else -> return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_BAD_VALUE))
@@ -752,7 +704,6 @@ class PlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> {
-            if (mediaId == SPOTIFY_ID) return Futures.immediateFuture(LibraryResult.ofItem(spotifyItem(), null))
             RadioRepository.categories.value.firstOrNull { CATEGORY_PREFIX + it.id == mediaId }?.let {
                 return Futures.immediateFuture(LibraryResult.ofItem(folder(mediaId, it.title), null))
             }
@@ -767,8 +718,7 @@ class PlaybackService : MediaLibraryService() {
             query: String,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<Void>> {
-            val count = findByQuery(query).size + if (isSpotifyQuery(query)) 1 else 0
-            session.notifySearchResultChanged(browser, query, count, params)
+            session.notifySearchResultChanged(browser, query, findByQuery(query).size, params)
             return Futures.immediateFuture(LibraryResult.ofVoid())
         }
 
@@ -780,12 +730,7 @@ class PlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-            Futures.immediateFuture(
-                LibraryResult.ofItemList(
-                    paged(listOfNotNull(if (isSpotifyQuery(query)) spotifyItem() else null) + findByQuery(query).map(::browseItem), page, pageSize),
-                    params,
-                ),
-            )
+            Futures.immediateFuture(LibraryResult.ofItemList(paged(findByQuery(query).map(::browseItem), page, pageSize), params))
 
         override fun onSetMediaItems(
             mediaSession: MediaSession,
@@ -797,9 +742,6 @@ class PlaybackService : MediaLibraryService() {
             // Ein einzelner Sender (Tipp in der App/im Auto, Sprachbefehl) → ganze Liste ab diesem Sender
             val first = mediaItems.getOrNull(if (startIndex == C.INDEX_UNSET) 0 else startIndex)
             val query = first?.requestMetadata?.searchQuery
-            if (first?.mediaId == SPOTIFY_ID || (RadioRepository.find(first?.mediaId) == null && isSpotifyQuery(query))) {
-                return startSpotifyMix(mediaSession)
-            }
             val id = when {
                 first == null -> RadioRepository.lastStationId
                 RadioRepository.find(first.mediaId) != null -> first.mediaId
@@ -813,12 +755,7 @@ class PlaybackService : MediaLibraryService() {
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
-        ): ListenableFuture<MutableList<MediaItem>> {
-            if (mediaItems.any { it.mediaId == SPOTIFY_ID }) return startSpotifyMix(mediaSession)
-            return addStations(mediaItems)
-        }
-
-        private fun addStations(mediaItems: List<MediaItem>): ListenableFuture<MutableList<MediaItem>> = io.submit<MutableList<MediaItem>> {
+        ): ListenableFuture<MutableList<MediaItem>> = io.submit<MutableList<MediaItem>> {
             mediaItems.mapNotNull { item ->
                 val station = RadioRepository.find(item.mediaId)
                     ?: item.requestMetadata.searchQuery?.let { findByQuery(it).firstOrNull() }
@@ -862,7 +799,6 @@ class PlaybackService : MediaLibraryService() {
         private const val MAX_FAILURES = 25
 
         private const val ROOT_ID = "root"
-        private const val SPOTIFY_ID = "spotify-mix"
         private const val CATEGORY_PREFIX = "cat-"
         private const val MORE_ID = "more"
         private const val MAX_TABS = 4

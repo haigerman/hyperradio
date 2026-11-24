@@ -9,7 +9,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -83,9 +86,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.res.painterResource
-import io.github.haigerman.hyperradio.R
-import io.github.haigerman.hyperradio.spotify.SpotifyRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.haigerman.hyperradio.data.Category
 import io.github.haigerman.hyperradio.data.PlaybackStatus
@@ -95,7 +95,7 @@ import io.github.haigerman.hyperradio.data.Station
 import io.github.haigerman.hyperradio.data.isValidStreamUrl
 
 @Composable
-fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpotifyClick: () -> Unit) {
+fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit) {
     val stations by RadioRepository.stations.collectAsStateWithLifecycle()
     val categories by RadioRepository.categories.collectAsStateWithLifecycle()
     val collapsed by RadioRepository.collapsed.collectAsStateWithLifecycle()
@@ -190,9 +190,7 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit, onSpo
                                 )
                             }
                             is ListRow.Empty -> EmptyCategoryHint(Modifier.animateItem())
-                            ListRow.Spotify -> SpotifyCard(onClick = onSpotifyClick, modifier = Modifier.animateItem())
                             ListRow.Add -> AddButtons(onAddStation = { adding = true }, onAddCategory = { creatingCategory = true })
-                            ListRow.AutoPlay -> AutoPlayRow(lastStation = stations.firstOrNull { it.id == status.stationId })
                             is ListRow.Restore -> RestoreRow(row.count, onClick = {
                                 RadioRepository.restoreHiddenPresets()
                                 notify("Eingebaute Sender wiederhergestellt")
@@ -347,16 +345,8 @@ private sealed interface ListRow {
         override val key = "empty-$categoryId"
     }
 
-    data object Spotify : ListRow {
-        override val key = "spotify"
-    }
-
     data object Add : ListRow {
         override val key = "add"
-    }
-
-    data object AutoPlay : ListRow {
-        override val key = "autoplay"
     }
 
     data class Restore(val count: Int) : ListRow {
@@ -368,17 +358,14 @@ private fun buildRows(stations: List<Station>, categories: List<Category>, colla
     buildList {
         categories.forEach { cat ->
             val members = stations.filter { it.categoryId == cat.id }
-            val withSpotify = cat.isFallback
             val expanded = cat.id !in collapsed
-            add(ListRow.Header(cat, members.size + if (withSpotify) 1 else 0, expanded))
+            add(ListRow.Header(cat, members.size, expanded))
             if (expanded) {
                 members.forEach { add(ListRow.StationRow(it)) }
-                if (withSpotify) add(ListRow.Spotify)
-                if (members.isEmpty() && !withSpotify) add(ListRow.Empty(cat.id))
+                if (members.isEmpty()) add(ListRow.Empty(cat.id))
             }
         }
         add(ListRow.Add)
-        add(ListRow.AutoPlay)
         if (hiddenCount > 0) add(ListRow.Restore(hiddenCount))
     }
 
@@ -393,7 +380,8 @@ private fun CategoryHeader(row: ListRow.Header, playing: Boolean, onClick: () ->
             .padding(top = 6.dp)
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+            // rechts wie die Senderkarten (8 dp) → alle ⋮ stehen genau untereinander
+            .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
     ) {
         Text(
             "▾",
@@ -404,26 +392,28 @@ private fun CategoryHeader(row: ListRow.Header, playing: Boolean, onClick: () ->
         Spacer(Modifier.width(8.dp))
         Text(row.category.emoji, fontSize = 18.sp)
         Spacer(Modifier.width(10.dp))
-        Text(
-            row.category.title,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Medium,
-            color = if (playing) Sand else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        Spacer(Modifier.width(8.dp))
-        Box(
-            Modifier
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.08f))
-                .padding(horizontal = 8.dp, vertical = 1.dp),
-        ) {
-            Text("${row.count}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Name, Anzahl und Equalizer nehmen den restlichen Platz – das ⋮ steht immer am rechten Rand
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+            Text(
+                row.category.title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (playing) Sand else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .padding(horizontal = 8.dp, vertical = 1.dp),
+            ) {
+                Text("${row.count}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (playing && !row.expanded) Equalizer(active = true, modifier = Modifier.padding(start = 10.dp))
         }
-        if (playing && !row.expanded) Equalizer(active = true, modifier = Modifier.padding(start = 10.dp))
-        Spacer(Modifier.weight(1f))
         MenuButton(onMenu, "Kategorie-Optionen")
     }
 }
@@ -550,102 +540,6 @@ private fun Equalizer(active: Boolean, modifier: Modifier = Modifier, color: Col
                 topLeft = Offset(i * 2 * w, size.height - h),
                 size = Size(w, h),
                 cornerRadius = CornerRadius(w / 2),
-            )
-        }
-    }
-}
-
-/** Karte im Stil der Sender, führt zur Spotify-Zufallswiedergabe. */
-@Composable
-private fun SpotifyCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val sp by SpotifyRepository.state.collectAsStateWithLifecycle()
-    val playing = sp.mixActive && sp.playback?.isPlaying == true
-    val subtitle = when {
-        !sp.configured -> "Einrichtung nötig"
-        !sp.loggedIn -> "Tippen zum Anmelden"
-        playing && sp.playback?.track != null -> "${sp.playback?.track} · ${sp.playback?.artists}"
-        sp.selected.isEmpty() -> "Künstler auswählen"
-        else -> "${sp.selected.size} Künstler · Zufallswiedergabe"
-    }
-    val bg by animateColorAsState(if (playing) CardOn else Card.copy(alpha = 0.7f), label = "bg")
-    Surface(
-        color = bg,
-        shape = RoundedCornerShape(20.dp),
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-        ) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.06f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(painterResource(R.drawable.ic_spotify), contentDescription = "Spotify", modifier = Modifier.size(28.dp))
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Spotify-Mix", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface)
-                Text(
-                    subtitle,
-                    fontSize = 13.sp,
-                    color = if (playing) SpotifyGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (playing) Equalizer(active = true, color = SpotifyGreen, modifier = Modifier.padding(start = 8.dp))
-            Text("›", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
-        }
-    }
-}
-
-/** Schalter "Auto Play": beim Verbinden mit Android Auto den zuletzt gehörten Sender fortsetzen. */
-@Composable
-private fun AutoPlayRow(lastStation: Station?) {
-    val enabled by RadioRepository.autoPlay.collectAsStateWithLifecycle()
-    Surface(
-        color = Card.copy(alpha = 0.7f),
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .clickable { RadioRepository.setAutoPlay(!enabled) },
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-        ) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(if (enabled) Sand.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f)),
-                contentAlignment = Alignment.Center,
-            ) { Text("🚗", fontSize = 22.sp) }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Auto Play", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface)
-                Text(
-                    if (enabled) "Mit Android Auto weiterhören" + (lastStation?.let { " · Zuletzt: ${it.name}" } ?: "")
-                    else "Beim Verbinden mit Android Auto den letzten Sender fortsetzen",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Switch(
-                checked = enabled,
-                onCheckedChange = { RadioRepository.setAutoPlay(it) },
-                colors = SwitchDefaults.colors(checkedThumbColor = Night, checkedTrackColor = Sand),
             )
         }
     }
@@ -781,6 +675,46 @@ private fun BottomPanel(stations: List<Station>, status: PlaybackStatus, onPlayP
         BufferBar(status)
         Spacer(Modifier.height(6.dp))
         Text(statusText(status, station), fontSize = 13.sp, color = statusColor(status.phase))
+        Spacer(Modifier.height(12.dp))
+        AutoPlayLine()
+    }
+}
+
+/** Unten unter dem Play-Knopf: feine Linie, darunter eine Zeile mit kleinem Schalter für Auto Play. */
+@Composable
+private fun AutoPlayLine() {
+    val enabled by RadioRepository.autoPlay.collectAsStateWithLifecycle()
+    Box(
+        Modifier
+            .fillMaxWidth(1f / 3f)
+            .height(1.dp)
+            .background(Color.White.copy(alpha = 0.15f)),
+    )
+    Spacer(Modifier.height(8.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { RadioRepository.setAutoPlay(!enabled) },
+    ) {
+        BasicText(
+            "Spiele bei Verbindung mit Android-Auto den letzten Sender",
+            maxLines = 1,
+            // passt die Schrift an, damit der Satz auch auf schmalen Handys in eine Zeile passt
+            autoSize = TextAutoSize.StepBased(minFontSize = 9.sp, maxFontSize = 12.sp, stepSize = 0.5.sp),
+            style = TextStyle(color = TextSoft.copy(alpha = 0.8f)),
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.size(width = 40.dp, height = 24.dp), contentAlignment = Alignment.Center) {
+            Switch(
+                checked = enabled,
+                onCheckedChange = { RadioRepository.setAutoPlay(it) },
+                colors = SwitchDefaults.colors(checkedThumbColor = Night, checkedTrackColor = Sand),
+                modifier = Modifier.scale(0.65f),
+            )
+        }
     }
 }
 

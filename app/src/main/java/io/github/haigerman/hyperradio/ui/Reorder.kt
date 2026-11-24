@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Sortieren einer LazyColumn per langem Drücken und Ziehen. Verschoben werden nur Einträge,
- * für die [canMove] true liefert (die Sender – nicht Spotify- oder Hinzufügen-Karte).
+ * für die [canMove] true liefert (die Sender – nicht Überschriften oder Hinzufügen-Knöpfe).
  */
 class ReorderState internal constructor(
     val listState: LazyListState,
