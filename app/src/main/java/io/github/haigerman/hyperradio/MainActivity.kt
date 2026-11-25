@@ -42,6 +42,8 @@ class MainActivity : ComponentActivity() {
                 RadioScreen(
                     onStationClick = ::playStation,
                     onPlayPause = ::togglePlayback,
+                    onSeekBack = { withController { it.seekBack() } },
+                    onSeekForward = { withController { it.seekForward() } },
                 )
             }
         }

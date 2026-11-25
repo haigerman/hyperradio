@@ -38,7 +38,10 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.CommandButton
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -220,6 +223,9 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             // hält CPU und WLAN wach, solange gespielt wird
             .setWakeMode(C.WAKE_MODE_NETWORK)
+            // ±20 s bei Podcasts
+            .setSeekBackIncrementMs(SEEK_STEP_MS)
+            .setSeekForwardIncrementMs(SEEK_STEP_MS)
             .build()
     }
 
@@ -250,7 +256,12 @@ class PlaybackService : MediaLibraryService() {
                 Player.STATE_ENDED -> {
                     // Ein Live-Stream "endet" nur, wenn der Server die Verbindung schließt –
                     // eine Podcast-Folge ist dagegen einfach zu Ende gehört
-                    if (player.playWhenReady && !isPodcast(player.currentMediaItem)) scheduleReconnect()
+                    if (isPodcast(player.currentMediaItem)) {
+                        // anhalten, damit das nächste Play wieder die neueste Folge prüft
+                        if (player.playWhenReady) player.pause()
+                    } else if (player.playWhenReady) {
+                        scheduleReconnect()
+                    }
                 }
             }
             publishStatus()
@@ -268,7 +279,12 @@ class PlaybackService : MediaLibraryService() {
                 main.postDelayed(stopAfterPause, STOP_AFTER_PAUSE_MS)
             } else {
                 gaveUp = false
-                if (player.playbackState == Player.STATE_IDLE && player.currentMediaItem != null) {
+                val idle = player.playbackState == Player.STATE_IDLE && player.currentMediaItem != null
+                if (isPodcast(player.currentMediaItem)) {
+                    // jeder Start eines Podcasts: ist das wirklich die neueste Folge?
+                    failures = 0
+                    ensureLatestEpisode(alsoPrepare = idle)
+                } else if (idle) {
                     failures = 0
                     reconnect()
                 }
@@ -287,7 +303,8 @@ class PlaybackService : MediaLibraryService() {
             hadReadyForItem = false
             mediaItem?.mediaId?.let { RadioRepository.lastStationId = it }
             // per Weiter/Zurück zu einem Podcast gewechselt → neueste Folge holen, falls veraltet
-            if (isPodcast(mediaItem) && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) refreshPodcastIfStale()
+            if (isPodcast(mediaItem)) ensureLatestEpisode(alsoPrepare = false)
+            updateMediaButtons()
             publishStatus()
         }
 
@@ -420,25 +437,97 @@ class PlaybackService : MediaLibraryService() {
 
     private fun isPodcast(item: MediaItem?): Boolean = RadioRepository.find(item?.mediaId)?.podcast == true
 
-    /** Holt die neueste Folge, wenn die gemerkte älter als [EPISODE_MAX_AGE_MS] ist. */
-    private fun refreshPodcastIfStale() {
+    /** Podcast, dessen Feed gerade geprüft wird */
+    private var checkingEpisodeOf: String? = null
+    private val unmute = Runnable { player.volume = 1f }
+
+    /**
+     * Stellt bei jedem Start eines Podcasts sicher, dass die neueste Folge geladen ist: Feed frisch
+     * abfragen; gibt es eine neuere Folge, wird sie geladen und beginnt von vorn, sonst geht es an
+     * der bisherigen Stelle weiter. Während der Prüfung bleibt der Ton kurz stumm, damit nicht die
+     * alte Folge anklingt. [alsoPrepare]: Player ist gestoppt und muss danach vorbereitet werden.
+     */
+    private fun ensureLatestEpisode(alsoPrepare: Boolean) {
         val item = player.currentMediaItem ?: return
         val station = RadioRepository.find(item.mediaId)?.takeIf { it.podcast } ?: return
+        val currentUrl = item.localConfiguration?.uri?.toString()
         val cached = episodes[station.id]
-        if (cached != null && System.currentTimeMillis() - cached.second < EPISODE_MAX_AGE_MS) return
-        val future = io.submit<MediaItem> { mediaItemFor(station, resolve = true) }
+        // eben erst geprüft (z. B. Podcast gerade ausgewählt) und genau diese Folge geladen → passt
+        if (cached != null && cached.first.url == currentUrl && System.currentTimeMillis() - cached.second < EPISODE_RECHECK_MS) {
+            if (alsoPrepare) preparePodcast()
+            return
+        }
+        if (checkingEpisodeOf == station.id) return
+        checkingEpisodeOf = station.id
+        player.volume = 0f
+        main.removeCallbacks(unmute)
+        main.postDelayed(unmute, MAX_MUTE_MS) // falls der Feed sehr lange braucht
+        val future = io.submit<PodcastFeed.Episode?> { PodcastFeed.latest(station.urls.first(), userAgent) }
         future.addListener({
-            val fresh = try {
+            checkingEpisodeOf = null
+            main.removeCallbacks(unmute)
+            val episode = try {
                 future.get()
             } catch (_: Exception) {
-                return@addListener
+                null
             }
-            if (player.currentMediaItem?.mediaId != station.id) return@addListener
-            if (fresh.localConfiguration?.uri != player.currentMediaItem?.localConfiguration?.uri) {
-                player.replaceMediaItem(player.currentMediaItemIndex, fresh)
-                player.prepare()
+            val current = player.currentMediaItem
+            if (current?.mediaId == station.id) {
+                if (episode != null) episodes[station.id] = episode to System.currentTimeMillis()
+                if (episode != null && episode.url != current.localConfiguration?.uri?.toString()) {
+                    // neuere Folge → laden und von vorn beginnen
+                    val index = player.currentMediaItemIndex
+                    hadReadyForItem = false
+                    player.replaceMediaItem(index, podcastItem(station, episode))
+                    player.seekTo(index, 0)
+                    player.prepare()
+                } else if (alsoPrepare) {
+                    preparePodcast()
+                }
             }
+            player.volume = 1f
+            publishStatus()
         }, ContextCompatExecutor(main))
+    }
+
+    private fun preparePodcast() {
+        hadReadyForItem = false
+        if (player.playbackState == Player.STATE_ENDED) player.seekToDefaultPosition(player.currentMediaItemIndex)
+        player.prepare()
+        publishStatus()
+    }
+
+    // ------------------------------------------------------------------ ±20 s (nur Podcasts)
+
+    private val seekBackCommand = SessionCommand(ACTION_SEEK_BACK, Bundle.EMPTY)
+    private val seekForwardCommand = SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY)
+
+    /** Zusätzliche Knöpfe neben Zurück/Vor in Benachrichtigung und Android Auto – nur bei Podcasts. */
+    private fun mediaButtons(): List<CommandButton> {
+        if (!isPodcast(player.currentMediaItem)) return emptyList()
+        return listOf(
+            CommandButton.Builder(CommandButton.ICON_SKIP_BACK)
+                .setCustomIconResId(R.drawable.ic_replay_20)
+                .setDisplayName("20 Sekunden zurück")
+                .setSessionCommand(seekBackCommand)
+                .setSlots(CommandButton.SLOT_BACK_SECONDARY)
+                .build(),
+            CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD)
+                .setCustomIconResId(R.drawable.ic_forward_20)
+                .setDisplayName("20 Sekunden vor")
+                .setSessionCommand(seekForwardCommand)
+                .setSlots(CommandButton.SLOT_FORWARD_SECONDARY)
+                .build(),
+        )
+    }
+
+    private var shownButtonsForPodcast: Boolean? = null
+
+    private fun updateMediaButtons() {
+        val podcast = isPodcast(player.currentMediaItem)
+        if (podcast == shownButtonsForPodcast) return
+        shownButtonsForPodcast = podcast
+        session?.setMediaButtonPreferences(mediaButtons())
     }
 
     // ------------------------------------------------------------------ Status für die UI
@@ -495,6 +584,10 @@ class PlaybackService : MediaLibraryService() {
         val episode = (if (resolve) PodcastFeed.latest(feed, userAgent) else null)
             ?.also { episodes[station.id] = it to System.currentTimeMillis() }
             ?: episodes[station.id]?.first
+        return podcastItem(station, episode)
+    }
+
+    private fun podcastItem(station: Station, episode: PodcastFeed.Episode?): MediaItem {
         val metadata = browseMetadata(station, liveCovers[station.id]).buildUpon()
             .setTitle(episode?.title ?: station.name)
             .setArtist(if (episode?.title != null) station.name else station.subtitle)
@@ -502,7 +595,7 @@ class PlaybackService : MediaLibraryService() {
             .build()
         return MediaItem.Builder()
             .setMediaId(station.id)
-            .setUri(episode?.url ?: feed)
+            .setUri(episode?.url ?: station.urls.first())
             .setMediaMetadata(metadata)
             .build()
     }
@@ -583,7 +676,7 @@ class PlaybackService : MediaLibraryService() {
         val start = stations.indexOfFirst { it.id == stationId }.coerceAtLeast(0)
         return io.submit<MediaSession.MediaItemsWithStartPosition> {
             // Podcast-Feeds nur für den gestarteten Eintrag laden (sonst verzögert jeder Senderstart);
-            // bei Weiter/Zurück zu einem Podcast holt refreshPodcastIfStale die neueste Folge
+            // bei Weiter/Zurück zu einem Podcast holt ensureLatestEpisode die neueste Folge
             val items = stations.map { mediaItemFor(it, resolve = !it.podcast || it.id == stations[start].id) }
             MediaSession.MediaItemsWithStartPosition(items, start, C.TIME_UNSET)
         }
@@ -654,7 +747,29 @@ class PlaybackService : MediaLibraryService() {
 
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
             if (isCar(controller)) onCarConnected()
-            return super.onConnect(session, controller)
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                        .add(seekBackCommand)
+                        .add(seekForwardCommand)
+                        .build(),
+                )
+                .setMediaButtonPreferences(mediaButtons())
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                ACTION_SEEK_BACK -> player.seekBack()
+                ACTION_SEEK_FORWARD -> player.seekForward()
+                else -> return super.onCustomCommand(session, controller, customCommand, args)
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
 
         override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
@@ -807,7 +922,12 @@ class PlaybackService : MediaLibraryService() {
         private val CAR_PACKAGES = setOf("com.google.android.projection.gearhead", "com.android.car.media", "com.google.android.carassistant")
         private const val AUTO_PLAY_DELAY_MS = 1_500L
         private const val AUTO_REARM_MS = 30_000L
-        private const val EPISODE_MAX_AGE_MS = 30 * 60_000L
+        /** So kurz nach dem Laden aus dem Feed gilt eine Folge noch als geprüft */
+        private const val EPISODE_RECHECK_MS = 60_000L
+        private const val MAX_MUTE_MS = 6_000L
+        private const val SEEK_STEP_MS = 20_000L
+        private const val ACTION_SEEK_BACK = "io.github.haigerman.hyperradio.SEEK_BACK_20"
+        private const val ACTION_SEEK_FORWARD = "io.github.haigerman.hyperradio.SEEK_FORWARD_20"
         private const val RECENT_ID = "recent"
         private const val CONTENT_STYLE_PLAYABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
         private const val CONTENT_STYLE_LIST = 1

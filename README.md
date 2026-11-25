@@ -33,10 +33,12 @@ Kategorien bündelt der vierte Tab „Weitere“ den Rest).
 Kategorie), eigene Sender bearbeiten, Sender löschen – mit „Rückgängig“. Auch eingebaute Sender
 lassen sich löschen; „Gelöschte Sender wiederherstellen“ am Listenende holt sie zurück.
 
-**Podcasts:** Für Podcasts ist der Feed hinterlegt; beim Antippen holt HyperRadio die neueste
-Folge. Anders als beim Radio geht es nach einer Pause an derselben Stelle weiter, am Ende der Folge
-hört die Wiedergabe auf („Folge zu Ende – tippe für die neueste Folge“), und unten stehen Position
-und Länge.
+**Podcasts:** Für Podcasts ist der Feed hinterlegt. Bei jedem Start – neu ausgewählt,
+fortgesetzt (App, Benachrichtigung, Android Auto) oder per Auto Play – fragt HyperRadio den Feed
+frisch ab: Gibt es eine neuere Folge, wird sie geladen und beginnt von vorn, sonst geht es an der
+bisherigen Stelle weiter. Am Ende der Folge hört die Wiedergabe auf („Folge zu Ende – tippe für die
+neueste Folge“), unten stehen Position und Länge. Neben Play (App) bzw. neben Zurück/Vor
+(Benachrichtigung, Android Auto) springen zwei Knöpfe 20 Sekunden zurück oder vor.
 
 **Auto Play (Schalter unten unter dem Play-Knopf):** Ist er an, setzt HyperRadio beim Verbinden mit
 Android Auto automatisch den zuletzt gehörten Sender fort (nur wenn gerade nichts läuft). Ob das

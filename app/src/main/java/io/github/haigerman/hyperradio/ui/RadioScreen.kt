@@ -56,6 +56,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -86,7 +87,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.haigerman.hyperradio.R
 import io.github.haigerman.hyperradio.data.Category
 import io.github.haigerman.hyperradio.data.PlaybackStatus
 import io.github.haigerman.hyperradio.data.PlayerPhase
@@ -95,7 +98,12 @@ import io.github.haigerman.hyperradio.data.Station
 import io.github.haigerman.hyperradio.data.isValidStreamUrl
 
 @Composable
-fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit) {
+fun RadioScreen(
+    onStationClick: (String) -> Unit,
+    onPlayPause: () -> Unit,
+    onSeekBack: () -> Unit = {},
+    onSeekForward: () -> Unit = {},
+) {
     val stations by RadioRepository.stations.collectAsStateWithLifecycle()
     val categories by RadioRepository.categories.collectAsStateWithLifecycle()
     val collapsed by RadioRepository.collapsed.collectAsStateWithLifecycle()
@@ -208,7 +216,7 @@ fun RadioScreen(onStationClick: (String) -> Unit, onPlayPause: () -> Unit) {
                     )
                 }
             }
-            BottomPanel(stations, status, onPlayPause, Modifier.navigationBarsPadding())
+            BottomPanel(stations, status, onPlayPause, onSeekBack, onSeekForward, Modifier.navigationBarsPadding())
         }
     }
 
@@ -643,7 +651,14 @@ private fun StationDialog(
 }
 
 @Composable
-private fun BottomPanel(stations: List<Station>, status: PlaybackStatus, onPlayPause: () -> Unit, modifier: Modifier = Modifier) {
+private fun BottomPanel(
+    stations: List<Station>,
+    status: PlaybackStatus,
+    onPlayPause: () -> Unit,
+    onSeekBack: () -> Unit,
+    onSeekForward: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val station = stations.firstOrNull { it.id == status.stationId }
     Column(
         modifier
@@ -670,13 +685,38 @@ private fun BottomPanel(stations: List<Station>, status: PlaybackStatus, onPlayP
         Spacer(Modifier.height(10.dp))
         val active = status.phase != PlayerPhase.IDLE && status.phase != PlayerPhase.PAUSED &&
             status.phase != PlayerPhase.ERROR && status.phase != PlayerPhase.ENDED
-        PlayButton(playing = active, live = status.phase == PlayerPhase.PLAYING, onClick = onPlayPause)
+        if (status.podcast) {
+            // Podcasts: 20 s zurück / vor links und rechts neben dem Play-Knopf
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                SkipButton(R.drawable.ic_replay_20, "20 Sekunden zurück", onSeekBack)
+                PlayButton(playing = active, live = status.phase == PlayerPhase.PLAYING, onClick = onPlayPause)
+                SkipButton(R.drawable.ic_forward_20, "20 Sekunden vor", onSeekForward)
+            }
+        } else {
+            PlayButton(playing = active, live = status.phase == PlayerPhase.PLAYING, onClick = onPlayPause)
+        }
         Spacer(Modifier.height(8.dp))
         BufferBar(status)
         Spacer(Modifier.height(6.dp))
         Text(statusText(status, station), fontSize = 13.sp, color = statusColor(status.phase))
         Spacer(Modifier.height(12.dp))
         AutoPlayLine()
+    }
+}
+
+/** Runder Knopf für ±20 s (nur bei Podcasts). */
+@Composable
+private fun SkipButton(icon: Int, description: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.08f))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(icon), contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(28.dp))
     }
 }
 

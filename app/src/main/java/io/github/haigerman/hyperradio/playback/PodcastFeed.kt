@@ -76,6 +76,10 @@ object PodcastFeed {
                 connectTimeout = 10_000
                 readTimeout = 15_000
                 instanceFollowRedirects = false
+                // immer frisch vom Server – nie einen zwischengespeicherten (veralteten) Feed
+                useCaches = false
+                setRequestProperty("Cache-Control", "no-cache")
+                setRequestProperty("Pragma", "no-cache")
                 setRequestProperty("User-Agent", userAgent)
                 setRequestProperty("Accept", "application/rss+xml, application/xml, text/xml, */*")
             }
