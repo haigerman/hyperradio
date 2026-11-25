@@ -502,7 +502,11 @@ class PlaybackService : MediaLibraryService() {
     private val seekBackCommand = SessionCommand(ACTION_SEEK_BACK, Bundle.EMPTY)
     private val seekForwardCommand = SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY)
 
-    /** Zusätzliche Knöpfe neben Zurück/Vor in Benachrichtigung und Android Auto – nur bei Podcasts. */
+    /**
+     * Zusätzliche Knöpfe neben Zurück/Vor in Benachrichtigung und Android Auto – nur bei Podcasts.
+     * Platz-Rangfolge: bevorzugt neben Zurück/Vor, sonst im Überlauf-Menü (⋯). Ohne diese
+     * Ausweichmöglichkeit verwirft Android Auto die Knöpfe, weil es den zweiten Platz nicht anbietet.
+     */
     private fun mediaButtons(): List<CommandButton> {
         if (!isPodcast(player.currentMediaItem)) return emptyList()
         return listOf(
@@ -510,13 +514,13 @@ class PlaybackService : MediaLibraryService() {
                 .setCustomIconResId(R.drawable.ic_replay_20)
                 .setDisplayName("20 Sekunden zurück")
                 .setSessionCommand(seekBackCommand)
-                .setSlots(CommandButton.SLOT_BACK_SECONDARY)
+                .setSlots(CommandButton.SLOT_BACK_SECONDARY, CommandButton.SLOT_OVERFLOW)
                 .build(),
             CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD)
                 .setCustomIconResId(R.drawable.ic_forward_20)
                 .setDisplayName("20 Sekunden vor")
                 .setSessionCommand(seekForwardCommand)
-                .setSlots(CommandButton.SLOT_FORWARD_SECONDARY)
+                .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
                 .build(),
         )
     }
@@ -527,7 +531,12 @@ class PlaybackService : MediaLibraryService() {
         val podcast = isPodcast(player.currentMediaItem)
         if (podcast == shownButtonsForPodcast) return
         shownButtonsForPodcast = podcast
-        session?.setMediaButtonPreferences(mediaButtons())
+        val buttons = mediaButtons()
+        val s = session ?: return
+        s.setMediaButtonPreferences(buttons)
+        // Android Auto ausdrücklich direkt benachrichtigen (verbindet sich dort über Media3)
+        s.connectedControllers.filter { isCar(it) || s.isAutoCompanionController(it) || s.isAutomotiveController(it) }
+            .forEach { s.setMediaButtonPreferences(it, buttons) }
     }
 
     // ------------------------------------------------------------------ Status für die UI
