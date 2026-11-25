@@ -37,8 +37,9 @@ lassen sich löschen; „Gelöschte Sender wiederherstellen“ am Listenende hol
 fortgesetzt (App, Benachrichtigung, Android Auto) oder per Auto Play – fragt HyperRadio den Feed
 frisch ab: Gibt es eine neuere Folge, wird sie geladen und beginnt von vorn, sonst geht es an der
 bisherigen Stelle weiter. Am Ende der Folge hört die Wiedergabe auf („Folge zu Ende – tippe für die
-neueste Folge“), unten stehen Position und Länge. Neben Play (App) bzw. neben Zurück/Vor
-(Benachrichtigung, Android Auto) springen zwei Knöpfe 20 Sekunden zurück oder vor.
+neueste Folge“), unten stehen Position und Länge. Bei Podcasts springen Zurück und Vor 20 Sekunden zurück bzw. vor statt
+zum Sender davor/danach – in der Benachrichtigung (mit „20“-Symbolen), in Android Auto, über
+Lenkrad- und Bluetooth-Tasten. In der App stehen dafür zwei Knöpfe neben Play.
 
 **Auto Play (Schalter unten unter dem Play-Knopf):** Ist er an, setzt HyperRadio beim Verbinden mit
 Android Auto automatisch den zuletzt gehörten Sender fort (nur wenn gerade nichts läuft). Ob das

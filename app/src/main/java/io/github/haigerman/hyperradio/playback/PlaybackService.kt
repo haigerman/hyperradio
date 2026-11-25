@@ -15,6 +15,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.car.app.connection.CarConnection
 import androidx.lifecycle.Observer
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Metadata
@@ -39,9 +40,7 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.CommandButton
-import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
-import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -133,7 +132,7 @@ class PlaybackService : MediaLibraryService() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaLibrarySession.Builder(this, player, LibraryCallback())
+        session = MediaLibrarySession.Builder(this, PodcastSeekPlayer(player), LibraryCallback())
             .setSessionActivity(openApp)
             .build()
 
@@ -499,28 +498,56 @@ class PlaybackService : MediaLibraryService() {
 
     // ------------------------------------------------------------------ ±20 s (nur Podcasts)
 
-    private val seekBackCommand = SessionCommand(ACTION_SEEK_BACK, Bundle.EMPTY)
-    private val seekForwardCommand = SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY)
+    /**
+     * Bei Podcasts springen Zurück/Vor 20 s zurück bzw. vor statt zum Sender davor/danach – überall,
+     * wo diese Tasten gedrückt werden (Benachrichtigung, Sperrbildschirm, Android Auto, Lenkrad,
+     * Bluetooth). Alle diese Wege landen bei der Mediensitzung, deshalb geschieht das hier.
+     */
+    private inner class PodcastSeekPlayer(player: Player) : ForwardingPlayer(player) {
+        private fun podcast() = isPodcast(currentMediaItem)
+
+        override fun seekToPrevious() = if (podcast()) seekBack() else super.seekToPrevious()
+        override fun seekToPreviousMediaItem() = if (podcast()) seekBack() else super.seekToPreviousMediaItem()
+        override fun seekToNext() = if (podcast()) seekForward() else super.seekToNext()
+        override fun seekToNextMediaItem() = if (podcast()) seekForward() else super.seekToNextMediaItem()
+
+        // Zurück/Vor auch anbieten, wenn der Podcast am Anfang oder Ende der Senderliste steht
+        override fun getAvailableCommands(): Player.Commands {
+            val commands = super.getAvailableCommands()
+            if (!podcast()) return commands
+            return commands.buildUpon()
+                .addAll(
+                    Player.COMMAND_SEEK_TO_PREVIOUS,
+                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                    Player.COMMAND_SEEK_TO_NEXT,
+                    Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                    Player.COMMAND_SEEK_BACK,
+                    Player.COMMAND_SEEK_FORWARD,
+                )
+                .build()
+        }
+
+        override fun isCommandAvailable(command: Int): Boolean = availableCommands.contains(command)
+    }
 
     /**
-     * Zusätzliche Knöpfe neben Zurück/Vor in Benachrichtigung und Android Auto – nur bei Podcasts.
-     * Platz-Rangfolge: bevorzugt neben Zurück/Vor, sonst im Überlauf-Menü (⋯). Ohne diese
-     * Ausweichmöglichkeit verwirft Android Auto die Knöpfe, weil es den zweiten Platz nicht anbietet.
+     * Bei Podcasts zeigen Zurück/Vor in der Benachrichtigung die „20“-Symbole (Android Auto zeichnet
+     * für diese Tasten eigene Pfeile, springt aber genauso um 20 s).
      */
     private fun mediaButtons(): List<CommandButton> {
         if (!isPodcast(player.currentMediaItem)) return emptyList()
         return listOf(
             CommandButton.Builder(CommandButton.ICON_SKIP_BACK)
+                .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS)
                 .setCustomIconResId(R.drawable.ic_replay_20)
                 .setDisplayName("20 Sekunden zurück")
-                .setSessionCommand(seekBackCommand)
-                .setSlots(CommandButton.SLOT_BACK_SECONDARY, CommandButton.SLOT_OVERFLOW)
+                .setSlots(CommandButton.SLOT_BACK)
                 .build(),
             CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD)
+                .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT)
                 .setCustomIconResId(R.drawable.ic_forward_20)
                 .setDisplayName("20 Sekunden vor")
-                .setSessionCommand(seekForwardCommand)
-                .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
+                .setSlots(CommandButton.SLOT_FORWARD)
                 .build(),
         )
     }
@@ -757,28 +784,8 @@ class PlaybackService : MediaLibraryService() {
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
             if (isCar(controller)) onCarConnected()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailableSessionCommands(
-                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                        .add(seekBackCommand)
-                        .add(seekForwardCommand)
-                        .build(),
-                )
                 .setMediaButtonPreferences(mediaButtons())
                 .build()
-        }
-
-        override fun onCustomCommand(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            customCommand: SessionCommand,
-            args: Bundle,
-        ): ListenableFuture<SessionResult> {
-            when (customCommand.customAction) {
-                ACTION_SEEK_BACK -> player.seekBack()
-                ACTION_SEEK_FORWARD -> player.seekForward()
-                else -> return super.onCustomCommand(session, controller, customCommand, args)
-            }
-            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
 
         override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
@@ -935,8 +942,6 @@ class PlaybackService : MediaLibraryService() {
         private const val EPISODE_RECHECK_MS = 60_000L
         private const val MAX_MUTE_MS = 6_000L
         private const val SEEK_STEP_MS = 20_000L
-        private const val ACTION_SEEK_BACK = "io.github.haigerman.hyperradio.SEEK_BACK_20"
-        private const val ACTION_SEEK_FORWARD = "io.github.haigerman.hyperradio.SEEK_FORWARD_20"
         private const val RECENT_ID = "recent"
         private const val CONTENT_STYLE_PLAYABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
         private const val CONTENT_STYLE_LIST = 1
