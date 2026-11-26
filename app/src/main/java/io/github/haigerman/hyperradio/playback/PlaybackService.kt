@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -40,7 +41,9 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.CommandButton
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -530,26 +533,63 @@ class PlaybackService : MediaLibraryService() {
         override fun isCommandAvailable(command: Int): Boolean = availableCommands.contains(command)
     }
 
+    // Eigene Befehle für die „20“-Knöpfe (nötig, damit Android Auto eigene Symbole zeigt)
+    private val seekBackCommand = SessionCommand(ACTION_SEEK_BACK, Bundle.EMPTY)
+    private val seekForwardCommand = SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY)
+    private val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+        .add(seekBackCommand)
+        .add(seekForwardCommand)
+        .build()
+
     /**
-     * Bei Podcasts zeigen Zurück/Vor in der Benachrichtigung die „20“-Symbole (Android Auto zeichnet
-     * für diese Tasten eigene Pfeile, springt aber genauso um 20 s).
+     * Knöpfe für Podcasts auf den Plätzen Zurück/Vor, mit „20“-Symbolen. Android Auto zeichnet für
+     * die Standardtasten Zurück/Vor immer eigene Pfeile – eigene Symbole zeigt es nur für eigene
+     * Knöpfe. Damit diese die Plätze bekommen, wird Zurück/Vor für die anzeigenden Gegenstellen
+     * abgemeldet (siehe [playerCommandsFor]). Ausweichplatz: Überlauf-Menü.
      */
     private fun mediaButtons(): List<CommandButton> {
         if (!isPodcast(player.currentMediaItem)) return emptyList()
         return listOf(
             CommandButton.Builder(CommandButton.ICON_SKIP_BACK)
-                .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS)
                 .setCustomIconResId(R.drawable.ic_replay_20)
                 .setDisplayName("20 Sekunden zurück")
-                .setSlots(CommandButton.SLOT_BACK)
+                .setSessionCommand(seekBackCommand)
+                .setSlots(CommandButton.SLOT_BACK, CommandButton.SLOT_OVERFLOW)
                 .build(),
             CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD)
-                .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT)
                 .setCustomIconResId(R.drawable.ic_forward_20)
                 .setDisplayName("20 Sekunden vor")
-                .setSlots(CommandButton.SLOT_FORWARD)
+                .setSessionCommand(seekForwardCommand)
+                .setSlots(CommandButton.SLOT_FORWARD, CommandButton.SLOT_OVERFLOW)
                 .build(),
         )
+    }
+
+    /** Gegenstellen, die Knöpfe anzeigen: Benachrichtigung/Systemsitzung (auch Android Auto) und Auto direkt. */
+    private fun showsButtons(controller: MediaSession.ControllerInfo): Boolean {
+        val s = session ?: return false
+        if (s.isMediaNotificationController(controller)) return true
+        // Android Auto direkt über Media3; der klassische Zugang (Lenkradtasten) behält Zurück/Vor
+        val media3 = controller.controllerVersion != MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION
+        return media3 && (s.isAutoCompanionController(controller) || s.isAutomotiveController(controller))
+    }
+
+    /**
+     * Bei Podcasts für anzeigende Gegenstellen ohne Zurück/Vor – dort sitzen die „20“-Knöpfe.
+     * Alle anderen (Lenkrad, Bluetooth, die App) behalten Zurück/Vor; das springt bei Podcasts
+     * ohnehin 20 s (siehe [PodcastSeekPlayer]).
+     */
+    private fun playerCommandsFor(controller: MediaSession.ControllerInfo): Player.Commands {
+        val base = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
+        if (!isPodcast(player.currentMediaItem) || !showsButtons(controller)) return base
+        return base.buildUpon()
+            .removeAll(
+                Player.COMMAND_SEEK_TO_PREVIOUS,
+                Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                Player.COMMAND_SEEK_TO_NEXT,
+                Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            )
+            .build()
     }
 
     private var shownButtonsForPodcast: Boolean? = null
@@ -558,12 +598,11 @@ class PlaybackService : MediaLibraryService() {
         val podcast = isPodcast(player.currentMediaItem)
         if (podcast == shownButtonsForPodcast) return
         shownButtonsForPodcast = podcast
-        val buttons = mediaButtons()
         val s = session ?: return
-        s.setMediaButtonPreferences(buttons)
-        // Android Auto ausdrücklich direkt benachrichtigen (verbindet sich dort über Media3)
-        s.connectedControllers.filter { isCar(it) || s.isAutoCompanionController(it) || s.isAutomotiveController(it) }
-            .forEach { s.setMediaButtonPreferences(it, buttons) }
+        s.setMediaButtonPreferences(mediaButtons())
+        s.connectedControllers.filter(::showsButtons).forEach { c ->
+            s.setAvailableCommands(c, sessionCommands, playerCommandsFor(c))
+        }
     }
 
     // ------------------------------------------------------------------ Status für die UI
@@ -784,8 +823,38 @@ class PlaybackService : MediaLibraryService() {
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
             if (isCar(controller)) onCarConnected()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(playerCommandsFor(controller))
                 .setMediaButtonPreferences(mediaButtons())
                 .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                ACTION_SEEK_BACK -> player.seekBack()
+                ACTION_SEEK_FORWARD -> player.seekForward()
+                else -> return super.onCustomCommand(session, controller, customCommand, args)
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+
+        /** Medientasten (Bluetooth, Lenkrad): bei Podcasts Nächster/Voriger = ±20 s */
+        override fun onMediaButtonEvent(session: MediaSession, controller: MediaSession.ControllerInfo, intent: Intent): Boolean {
+            if (!isPodcast(player.currentMediaItem)) return false
+            @Suppress("DEPRECATION")
+            val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
+            val forward = event.keyCode == KeyEvent.KEYCODE_MEDIA_NEXT || event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+            val back = event.keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS || event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND
+            if (!forward && !back) return false
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                if (forward) player.seekForward() else player.seekBack()
+            }
+            return true
         }
 
         override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
@@ -942,6 +1011,8 @@ class PlaybackService : MediaLibraryService() {
         private const val EPISODE_RECHECK_MS = 60_000L
         private const val MAX_MUTE_MS = 6_000L
         private const val SEEK_STEP_MS = 20_000L
+        private const val ACTION_SEEK_BACK = "io.github.haigerman.hyperradio.SEEK_BACK_20"
+        private const val ACTION_SEEK_FORWARD = "io.github.haigerman.hyperradio.SEEK_FORWARD_20"
         private const val RECENT_ID = "recent"
         private const val CONTENT_STYLE_PLAYABLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
         private const val CONTENT_STYLE_LIST = 1
