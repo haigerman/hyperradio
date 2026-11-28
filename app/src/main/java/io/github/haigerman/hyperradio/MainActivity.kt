@@ -2,7 +2,8 @@ package io.github.haigerman.hyperradio
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothClass
+import android.bluetooth.BluetoothManager
 import android.companion.AssociationInfo
 import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
@@ -32,6 +33,11 @@ import io.github.haigerman.hyperradio.data.PlayerPhase
 import io.github.haigerman.hyperradio.data.RadioRepository
 import io.github.haigerman.hyperradio.playback.PlaybackService
 import io.github.haigerman.hyperradio.ui.HyperRadioTheme
+import io.github.haigerman.hyperradio.ui.PairedDevice
+import io.github.haigerman.hyperradio.ui.PairedDevicePicker
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import io.github.haigerman.hyperradio.ui.RadioScreen
 
 class MainActivity : ComponentActivity() {
@@ -60,11 +66,22 @@ class MainActivity : ComponentActivity() {
                     onAddSpeaker = ::addSpeaker,
                     onRemoveSpeaker = ::removeSpeaker,
                 )
+                pairedChoice?.let { devices ->
+                    PairedDevicePicker(
+                        devices = devices,
+                        alreadyAdded = SpeakerStore.speakers.value.map { it.address }.toSet(),
+                        onPick = ::onPairedDeviceChosen,
+                        onDismiss = { pairedChoice = null },
+                    )
+                }
             }
         }
     }
 
     // ------------------------------------------------------------------ Bluetooth-Lautsprecher
+
+    /** Gerade angezeigte Auswahl der gekoppelten Geräte (null = Auswahl geschlossen) */
+    private var pairedChoice by mutableStateOf<List<PairedDevice>?>(null)
 
     private val companionDevices: CompanionDeviceManager?
         get() = if (packageManager.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP)) {
@@ -73,77 +90,125 @@ class MainActivity : ComponentActivity() {
             null
         }
 
-    /** Ergebnis des Android-Dialogs "Mit HyperRadio verknüpfen" */
+    private val bluetoothPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) showPairedDevices()
+            else Toast.makeText(this, "Ohne die Berechtigung „Geräte in der Nähe“ sieht HyperRadio keine gekoppelten Geräte", Toast.LENGTH_LONG).show()
+        }
+
+    /** „＋“: gekoppelte Geräte anzeigen (ab Android 12 zuerst die Berechtigung erfragen). */
+    private fun addSpeaker() {
+        if (Build.VERSION.SDK_INT >= 31 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            showPairedDevices()
+        }
+    }
+
+    @SuppressLint("MissingPermission") // Berechtigung wird in addSpeaker() geprüft
+    private fun showPairedDevices() {
+        val adapter = getSystemService(BluetoothManager::class.java)?.adapter
+        if (adapter == null) {
+            Toast.makeText(this, "Dieses Gerät hat kein Bluetooth", Toast.LENGTH_LONG).show()
+            return
+        }
+        val devices = try {
+            adapter.bondedDevices.orEmpty().map { d ->
+                val audio = d.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO
+                PairedDevice(d.address, d.name?.takeIf { it.isNotBlank() } ?: d.address, audio)
+            }
+        } catch (_: SecurityException) {
+            emptyList()
+        }
+        if (devices.isEmpty()) {
+            Toast.makeText(this, "Keine gekoppelten Bluetooth-Geräte gefunden – bitte zuerst in den Android-Einstellungen koppeln", Toast.LENGTH_LONG).show()
+            return
+        }
+        // Lautsprecher/Kopfhörer zuerst, dann alphabetisch
+        pairedChoice = devices.sortedWith(compareBy<PairedDevice>({ !it.audio }, { it.name.lowercase() }))
+    }
+
+    /** Gekoppeltes Gerät gewählt: speichern und von Android für den Start im Hintergrund verknüpfen lassen. */
+    private fun onPairedDeviceChosen(device: PairedDevice) {
+        pairedChoice = null
+        SpeakerStore.add(Speaker(device.address, device.name))
+        Toast.makeText(this, "„${device.name}“ hinzugefügt", Toast.LENGTH_SHORT).show()
+        associate(device.address)
+    }
+
+    /** Ergebnis von Androids Rückfrage „HyperRadio mit … verknüpfen?“ */
     private val associationLauncher =
         registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            val address = pendingAssociation
+            pendingAssociation = null
             if (result.resultCode != RESULT_OK) return@registerForActivityResult
-            val data = result.data ?: return@registerForActivityResult
             if (Build.VERSION.SDK_INT >= 33) {
-                data.getParcelableExtra(CompanionDeviceManager.EXTRA_ASSOCIATION, AssociationInfo::class.java)?.let(::onAssociated)
-            } else {
-                @Suppress("DEPRECATION")
-                val device = data.getParcelableExtra<BluetoothDevice>(CompanionDeviceManager.EXTRA_DEVICE) ?: return@registerForActivityResult
-                // Gerätename braucht ab Android 12 die Bluetooth-Berechtigung – sonst die Adresse anzeigen
-                val mayReadName = Build.VERSION.SDK_INT < 31 ||
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-                val name = if (mayReadName) {
-                    try {
-                        @SuppressLint("MissingPermission")
-                        val n = device.name
-                        n
-                    } catch (_: SecurityException) {
-                        null
-                    }
-                } else {
-                    null
-                }
-                saveSpeaker(Speaker(device.address, name?.takeIf { it.isNotBlank() } ?: device.address))
+                result.data?.getParcelableExtra(CompanionDeviceManager.EXTRA_ASSOCIATION, AssociationInfo::class.java)?.let(::onAssociated)
+            } else if (address != null) {
+                observePresence(address) // Android 12
             }
         }
+
+    /** Gerät, für das gerade Androids Rückfrage läuft */
+    private var pendingAssociation: String? = null
 
     @RequiresApi(33)
     private fun onAssociated(info: AssociationInfo) {
         val address = info.deviceMacAddress?.toString() ?: return
-        saveSpeaker(Speaker(address, info.displayName?.toString()?.takeIf { it.isNotBlank() } ?: address, info.id))
+        val known = SpeakerStore.find(address)
+        SpeakerStore.add(Speaker(address, known?.name ?: info.displayName?.toString() ?: address, info.id))
+        observePresence(address)
     }
 
-    private fun saveSpeaker(speaker: Speaker) {
-        SpeakerStore.add(speaker)
-        // ab Android 12: Android meldet von nun an, wenn sich der Lautsprecher verbindet
+    private fun observePresence(address: String) {
         if (Build.VERSION.SDK_INT >= 31) {
-            runCatching { @Suppress("DEPRECATION") companionDevices?.startObservingDevicePresence(speaker.address) }
+            runCatching {
+                @Suppress("DEPRECATION")
+                companionDevices?.startObservingDevicePresence(address.uppercase())
+            }
         }
-        Toast.makeText(this, "„${speaker.name}“ verknüpft", Toast.LENGTH_SHORT).show()
     }
 
-    /** Öffnet Androids Dialog zur Auswahl und Verknüpfung eines Bluetooth-Geräts. */
-    private fun addSpeaker() {
-        val cdm = companionDevices
-        if (cdm == null) {
-            Toast.makeText(this, "Dieses Gerät unterstützt keine Geräte-Verknüpfung", Toast.LENGTH_LONG).show()
+    /**
+     * Verknüpft genau dieses (schon gekoppelte) Gerät mit HyperRadio – keine Suche nach neuen
+     * Geräten, nur Androids kurze Rückfrage. Die Verknüpfung erlaubt es Android, HyperRadio beim
+     * Verbinden zu wecken und die Wiedergabe auch aus dem Hintergrund zu starten.
+     */
+    private fun associate(address: String) {
+        val cdm = companionDevices ?: return
+        if (Build.VERSION.SDK_INT >= 33 &&
+            cdm.myAssociations.any { it.deviceMacAddress?.toString().equals(address, ignoreCase = true) }
+        ) {
+            observePresence(address)
             return
         }
         val request = AssociationRequest.Builder()
-            .addDeviceFilter(BluetoothDeviceFilter.Builder().build())
-            .setSingleDevice(false)
+            .addDeviceFilter(BluetoothDeviceFilter.Builder().setAddress(address.uppercase()).build())
+            .setSingleDevice(true)
             .build()
-        val launch = { sender: IntentSender -> associationLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
-        val failed = { error: CharSequence? ->
-            Toast.makeText(this, "Verknüpfen nicht möglich" + (error?.let { ": $it" } ?: ""), Toast.LENGTH_LONG).show()
+        val launch = { sender: IntentSender ->
+            pendingAssociation = address
+            associationLauncher.launch(IntentSenderRequest.Builder(sender).build())
         }
-        if (Build.VERSION.SDK_INT >= 33) {
-            cdm.associate(request, mainExecutor, object : CompanionDeviceManager.Callback() {
-                override fun onAssociationPending(intentSender: IntentSender) = launch(intentSender)
-                override fun onAssociationCreated(associationInfo: AssociationInfo) = onAssociated(associationInfo)
-                override fun onFailure(error: CharSequence?) = failed(error)
-            })
-        } else {
-            @Suppress("DEPRECATION")
-            cdm.associate(request, object : CompanionDeviceManager.Callback() {
-                @Deprecated("Ab Android 13 ersetzt")
-                override fun onDeviceFound(intentSender: IntentSender) = launch(intentSender)
-                override fun onFailure(error: CharSequence?) = failed(error)
-            }, null)
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                cdm.associate(request, mainExecutor, object : CompanionDeviceManager.Callback() {
+                    override fun onAssociationPending(intentSender: IntentSender) = launch(intentSender)
+                    override fun onAssociationCreated(associationInfo: AssociationInfo) = onAssociated(associationInfo)
+                    override fun onFailure(error: CharSequence?) {}
+                })
+            } else {
+                @Suppress("DEPRECATION")
+                cdm.associate(request, object : CompanionDeviceManager.Callback() {
+                    @Deprecated("Ab Android 13 ersetzt")
+                    override fun onDeviceFound(intentSender: IntentSender) = launch(intentSender)
+                    override fun onFailure(error: CharSequence?) {}
+                }, null)
+            }
+        } catch (_: Exception) {
+            // ohne Verknüpfung greift weiterhin die Bluetooth-Verbindungsmeldung
         }
     }
 

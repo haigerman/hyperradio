@@ -86,11 +86,13 @@ class SpeakerPresenceService : CompanionDeviceService() {
     }
 }
 
-/** Bis Android 11: Bluetooth-Verbindungsmeldungen (dort darf die App aus dem Hintergrund starten). */
+/**
+ * Bluetooth-Verbindungsmeldung von Android (alle Versionen; ab Android 12 mit der Berechtigung
+ * „Geräte in der Nähe“). Doppelte Meldungen zusammen mit [SpeakerPresenceService] fängt die
+ * 30-Sekunden-Regel ab.
+ */
 class SpeakerConnectionReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return // ab Android 12 über SpeakerPresenceService
-        @Suppress("DEPRECATION")
+    override fun onReceive(context: Context, intent: Intent) {        @Suppress("DEPRECATION")
         val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
         when (intent.action) {
             BluetoothDevice.ACTION_ACL_CONNECTED -> SpeakerAutoPlay.onSpeakerConnected(context, device.address)

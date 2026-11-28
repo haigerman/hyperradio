@@ -47,13 +47,14 @@ Auto verbunden ist, erkennt die App über Androids offizielle Abfrage (CarConnec
 Unterbrechung von mindestens 30 Sekunden (z. B. kurz einkaufen) startet der Sender beim
 Wiedereinsteigen erneut; kürzere Verbindungsaussetzer lösen keinen Neustart aus.
 
-**Bluetooth-Lautsprecher (Zeile unter Auto Play):** „＋“ öffnet Androids Dialog zum Verknüpfen
-eines Bluetooth-Geräts. Verbindet sich ein verknüpfter Lautsprecher, startet HyperRadio nach etwa
-3 Sekunden (sobald die Audioverbindung steht) den zuletzt gehörten Sender – nur wenn gerade nichts
-läuft und der Lautsprecher mindestens 30 Sekunden getrennt war. Ab Android 12 läuft das über
-Androids Geräte-Verknüpfung (Companion Device), dadurch darf die App auch aus dem Hintergrund
-starten; bis Android 11 über die Bluetooth-Verbindungsmeldung. Über ✎ lassen sich Lautsprecher
-wieder entfernen.
+**Bluetooth-Lautsprecher (Zeile unter Auto Play):** „＋“ zeigt die Geräte, die bereits mit dem
+Handy gekoppelt sind (Lautsprecher/Kopfhörer zuerst; ab Android 12 einmal die Berechtigung „Geräte
+in der Nähe“). Nach der Auswahl bestätigt Android kurz die Verknüpfung genau dieses Geräts – damit
+darf HyperRadio auch aus dem Hintergrund starten. Verbindet sich ein gewähltes Gerät, startet
+HyperRadio nach etwa 3 Sekunden (sobald die Audioverbindung steht) den zuletzt gehörten Sender – nur
+wenn gerade nichts läuft und das Gerät mindestens 30 Sekunden getrennt war. Erkannt wird die
+Verbindung über Androids Bluetooth-Meldung und (ab Android 12) zusätzlich über die
+Geräte-Verknüpfung. Über ✎ lassen sich Geräte wieder entfernen.
 
 **Kategorien verwalten:** „＋ Kategorie“ am Listenende legt eine neue an (Name + Symbol).
 Über ⋮ an der Überschrift: umbenennen/Symbol ändern, nach oben/unten schieben, löschen – die

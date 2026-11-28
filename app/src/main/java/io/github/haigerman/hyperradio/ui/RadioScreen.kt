@@ -1147,3 +1147,47 @@ private fun CategoryDialog(
         },
     )
 }
+
+/** Ein mit dem Handy gekoppeltes Bluetooth-Gerät (für die Auswahl). */
+data class PairedDevice(val address: String, val name: String, val audio: Boolean)
+
+/** Auswahl aus den bereits gekoppelten Bluetooth-Geräten – Lautsprecher/Kopfhörer zuerst. */
+@Composable
+fun PairedDevicePicker(devices: List<PairedDevice>, alreadyAdded: Set<String>, onPick: (PairedDevice) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Card,
+        title = { Text("Gekoppeltes Gerät wählen", fontWeight = FontWeight.Light) },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.height((devices.size * 56).coerceAtMost(360).dp)) {
+                items(devices, key = { it.address }) { d ->
+                    val added = d.address.uppercase() in alreadyAdded
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = !added) { onPick(d) }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                    ) {
+                        Text(if (d.audio) "🔊" else "📶", fontSize = 18.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            d.name,
+                            fontSize = 16.sp,
+                            color = if (added) TextSoft.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (added) Text("✓", fontSize = 16.sp, color = Sand)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        },
+    )
+}
