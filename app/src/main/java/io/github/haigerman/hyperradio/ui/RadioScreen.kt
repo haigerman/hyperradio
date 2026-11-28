@@ -94,6 +94,8 @@ import io.github.haigerman.hyperradio.data.Category
 import io.github.haigerman.hyperradio.data.PlaybackStatus
 import io.github.haigerman.hyperradio.data.PlayerPhase
 import io.github.haigerman.hyperradio.data.RadioRepository
+import io.github.haigerman.hyperradio.data.Speaker
+import io.github.haigerman.hyperradio.data.SpeakerStore
 import io.github.haigerman.hyperradio.data.Station
 import io.github.haigerman.hyperradio.data.isValidStreamUrl
 
@@ -103,6 +105,8 @@ fun RadioScreen(
     onPlayPause: () -> Unit,
     onSeekBack: () -> Unit = {},
     onSeekForward: () -> Unit = {},
+    onAddSpeaker: () -> Unit = {},
+    onRemoveSpeaker: (Speaker) -> Unit = {},
 ) {
     val stations by RadioRepository.stations.collectAsStateWithLifecycle()
     val categories by RadioRepository.categories.collectAsStateWithLifecycle()
@@ -216,7 +220,7 @@ fun RadioScreen(
                     )
                 }
             }
-            BottomPanel(stations, status, onPlayPause, onSeekBack, onSeekForward, Modifier.navigationBarsPadding())
+            BottomPanel(stations, status, onPlayPause, onSeekBack, onSeekForward, onAddSpeaker, onRemoveSpeaker, Modifier.navigationBarsPadding())
         }
     }
 
@@ -657,6 +661,8 @@ private fun BottomPanel(
     onPlayPause: () -> Unit,
     onSeekBack: () -> Unit,
     onSeekForward: () -> Unit,
+    onAddSpeaker: () -> Unit,
+    onRemoveSpeaker: (Speaker) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val station = stations.firstOrNull { it.id == status.stationId }
@@ -701,6 +707,73 @@ private fun BottomPanel(
         Text(statusText(status, station), fontSize = 13.sp, color = statusColor(status.phase))
         Spacer(Modifier.height(12.dp))
         AutoPlayLine()
+        SpeakerLine(onAddSpeaker, onRemoveSpeaker)
+    }
+}
+
+/** Zweite Zeile unter Auto Play: Bluetooth-Lautsprecher, bei deren Verbindung der letzte Sender startet. */
+@Composable
+private fun SpeakerLine(onAdd: () -> Unit, onRemove: (Speaker) -> Unit) {
+    val speakers by SpeakerStore.speakers.collectAsStateWithLifecycle()
+    var open by rememberSaveable { mutableStateOf(false) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { if (speakers.isEmpty()) onAdd() else open = true },
+    ) {
+        BasicText(
+            if (speakers.isEmpty()) "Auch bei Bluetooth-Lautsprecher den letzten Sender spielen"
+            else "Auch bei Bluetooth-Lautsprecher: " + speakers.joinToString(", ") { it.name },
+            maxLines = 1,
+            autoSize = TextAutoSize.StepBased(minFontSize = 9.sp, maxFontSize = 12.sp, stepSize = 0.5.sp),
+            style = TextStyle(color = TextSoft.copy(alpha = 0.8f)),
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (speakers.isEmpty()) "＋" else "✎",
+            fontSize = 15.sp,
+            color = Sand,
+            modifier = Modifier.width(40.dp),
+            textAlign = TextAlign.Center,
+        )
+    }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            containerColor = Card,
+            title = { Text("Bluetooth-Lautsprecher", fontWeight = FontWeight.Light) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Verbindet sich einer dieser Lautsprecher, startet HyperRadio den zuletzt gehörten Sender " +
+                            "(wenn gerade nichts läuft und er mindestens 30 Sekunden getrennt war).",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    speakers.forEach { sp ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🔊", fontSize = 18.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(sp.name, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { onRemove(sp) }) { Text("Entfernen", color = Coral) }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    open = false
+                    onAdd()
+                }) { Text("＋ Lautsprecher hinzufügen", color = Sand) }
+            },
+            dismissButton = {
+                TextButton(onClick = { open = false }) { Text("Fertig", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
+        )
     }
 }
 

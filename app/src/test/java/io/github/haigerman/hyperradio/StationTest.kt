@@ -187,3 +187,25 @@ class StationEditingTest {
         assertEquals(Category.defaults, RadioRepository.decodeCategories(null))
     }
 }
+
+class SpeakerStoreTest {
+    private val s = 1000L
+
+    @Test
+    fun startRuleAfter30Seconds() {
+        val st = io.github.haigerman.hyperradio.data.SpeakerStore
+        assertTrue(st.shouldStart(100 * s, null, null))                     // erste Verbindung
+        assertTrue(st.shouldStart(300 * s, lastDisconnect = 200 * s, lastStart = 10 * s)) // 100 s getrennt
+        assertFalse(st.shouldStart(220 * s, lastDisconnect = 200 * s, lastStart = 10 * s)) // nur 20 s getrennt
+        assertFalse(st.shouldStart(30 * s, lastDisconnect = null, lastStart = 10 * s))     // gerade erst gestartet
+    }
+
+    @Test
+    fun speakersRoundTrip() {
+        val st = io.github.haigerman.hyperradio.data.SpeakerStore
+        val list = listOf(io.github.haigerman.hyperradio.data.Speaker("AA:BB:CC:DD:EE:FF", "JBL Flip 6", 3))
+        assertEquals(list, st.decode(st.encode(list)))
+        assertEquals("AA:BB:CC:00:11:22", st.normalize(" aa:bb:cc:00:11:22 "))
+        assertEquals(emptyList<Any>(), st.decode("kaputt"))
+    }
+}
